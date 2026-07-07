@@ -4,7 +4,7 @@ using System.Text;
 
 namespace HMI.ExternalConnection.PLCs
 {
-    internal class Codesys : PLC
+    internal class Codesys : PLC, IMachineConnection
     {
         public Codesys(string IpAddress, int IpPort) : base(IpAddress, IpPort)
         {
