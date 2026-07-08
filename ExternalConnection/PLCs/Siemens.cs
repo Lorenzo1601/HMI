@@ -3,6 +3,11 @@ using System.Collections.Generic;
 using System.Text;
 using HMI.Models;
 using static HMI.ExternalConnection.IMachineConnection;
+using PLCcom;
+using PLCcom.Core.S7Plus;
+using PLCcom.Core.S7Plus.AddressSpace;
+using PLCcom.Requests.S7Plus;
+using PLCcom.Results.S7Plus;
 
 namespace HMI.ExternalConnection.PLCs
 {
@@ -11,12 +16,25 @@ namespace HMI.ExternalConnection.PLCs
         public bool IsConnected { get; private set; }
         public event EventHandler<DataChangedEventArgs> OnDataChanged;
         public event EventHandler ConnectionLost;
+        private string _ipAddress;
+        private int _ipPort;
+        private string _connectionUsername;
+        private string _connectionPassword;
+        private ePLCType _connectionType;
 
-        public Siemens(string IpAddress, int IpPort) : base(IpAddress, IpPort)
+        public Siemens(string IpAddress, int IpPort, ePLCType plcType) : base(IpAddress, IpPort)
         {
+            _ipAddress = IpAddress;
+            _ipPort = IpPort;
+            _connectionType = plcType;
         }
-        public Siemens(string IpAddress, int IpPort, string ConnectionUsername, string ConnectionPassword) : base(IpAddress, IpPort, ConnectionUsername, ConnectionPassword)
+        public Siemens(string IpAddress, int IpPort, string ConnectionUsername, string ConnectionPassword, ePLCType plcType) : base(IpAddress, IpPort, ConnectionUsername, ConnectionPassword)
         {
+            _ipAddress = IpAddress;
+            _ipPort = IpPort;
+            _connectionUsername = ConnectionUsername;
+            _connectionPassword = ConnectionPassword;
+            _connectionType = plcType;
         }
 
         // Implementazione dei metodi dell'interfaccia
