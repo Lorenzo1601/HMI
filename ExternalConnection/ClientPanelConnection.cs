@@ -76,18 +76,6 @@ namespace HMI.ExternalConnection
             return true;
         }
 
-        private void CheckServerStatus()
-        {
-            // ... logica fittizia in cui ti accorgi che il Server HMI è spento
-            bool serverMorto = true;
-
-            if (serverMorto)
-            {
-                this.IsConnected = false;
-                // Avviso l'applicazione che ho perso il Server
-                ConnectionLost?.Invoke(this, EventArgs.Empty);
-            }
-        }
 
     }
 }

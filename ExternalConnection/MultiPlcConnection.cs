@@ -16,12 +16,12 @@ namespace HMI.ExternalConnection
         public event EventHandler ConnectionLost;
 
         // Metodo per aggiungere i PLC al nostro gestore
-        public void AggiungiPlc(string nome, IMachineConnection connessionePlc)
+        public void AddPlc(string nome, IMachineConnection PlcConnection)
         {
-            _plcs[nome] = connessionePlc;
+            _plcs[nome] = PlcConnection;
 
             // Ri-inoltriamo gli eventi dei singoli PLC verso l'alto (aggiungendo il prefisso)
-            connessionePlc.OnDataChanged += (sender, e) =>
+            PlcConnection.OnDataChanged += (sender, e) =>
             {
                 OnDataChanged?.Invoke(this, new DataChangedEventArgs
                 {
@@ -30,7 +30,7 @@ namespace HMI.ExternalConnection
                 });
             };
 
-            connessionePlc.ConnectionLost += (sender, e) => ConnectionLost?.Invoke(this, EventArgs.Empty);
+            PlcConnection.ConnectionLost += (sender, e) => ConnectionLost?.Invoke(this, EventArgs.Empty);
         }
 
         public async Task<bool> ConnectAsync()

@@ -61,8 +61,8 @@ namespace HMI
                 var gestorePlc = new MultiPlcConnection();
 
                 // Aggiungi tutti i PLC del tuo impianto
-                gestorePlc.AggiungiPlc("PLC_1", new Siemens("192.168.0.10", 102));
-                gestorePlc.AggiungiPlc("PLC_2", new Codesys("192.168.0.20", 1202));
+                gestorePlc.AddPlc("PLC_1", new Siemens("192.168.0.10", 102,S7.Net.CpuType.S71500));
+                gestorePlc.AddPlc("PLC_2", new Codesys("192.168.0.20", 1202));
 
                 Connection = gestorePlc;
 

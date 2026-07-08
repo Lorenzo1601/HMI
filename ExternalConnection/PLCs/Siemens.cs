@@ -1,59 +1,69 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Text;
+using System.Threading.Tasks;
 using HMI.Models;
-using static HMI.ExternalConnection.IMachineConnection;
-using PLCcom;
-using PLCcom.Core.S7Plus;
-using PLCcom.Core.S7Plus.AddressSpace;
-using PLCcom.Requests.S7Plus;
-using PLCcom.Results.S7Plus;
+using S7.Net;
 
 namespace HMI.ExternalConnection.PLCs
 {
     internal class Siemens : PLC, IMachineConnection
     {
         public bool IsConnected { get; private set; }
+
         public event EventHandler<DataChangedEventArgs> OnDataChanged;
         public event EventHandler ConnectionLost;
-        private string _ipAddress;
-        private int _ipPort;
-        private string _connectionUsername;
-        private string _connectionPassword;
-        private ePLCType _connectionType;
 
-        public Siemens(string IpAddress, int IpPort, ePLCType plcType) : base(IpAddress, IpPort)
+        private CpuType _connectionType;
+        private short _rack;
+        private short _slot;
+
+        private Plc _plc; 
+
+        // Ho aggiunto Rack e Slot con valori di default 0 e 1 (per S7-1200/1500)
+        public Siemens(string IpAddress, int IpPort, CpuType plcType, short rack = 0, short slot = 1)
+            : base(IpAddress, IpPort)
         {
-            _ipAddress = IpAddress;
-            _ipPort = IpPort;
             _connectionType = plcType;
+            _rack = rack;
+            _slot = slot;
         }
-        public Siemens(string IpAddress, int IpPort, string ConnectionUsername, string ConnectionPassword, ePLCType plcType) : base(IpAddress, IpPort, ConnectionUsername, ConnectionPassword)
+
+        public Siemens(string IpAddress, int IpPort, string ConnectionUsername, string ConnectionPassword, CpuType plcType, short rack = 0, short slot = 1)
+            : base(IpAddress, IpPort, ConnectionUsername, ConnectionPassword)
         {
-            _ipAddress = IpAddress;
-            _ipPort = IpPort;
-            _connectionUsername = ConnectionUsername;
-            _connectionPassword = ConnectionPassword;
             _connectionType = plcType;
+            _rack = rack;
+            _slot = slot;
         }
 
-        // Implementazione dei metodi dell'interfaccia
-        public async Task<bool> ConnectAsync()
+        public async Task<bool> ConnectAsync() //Collegamento al PLC Siemens
         {
-            // Qui usi una libreria come S7.Net per collegarti al Siemens
-            // usando this.IpAddress e this.IpPort (ereditati da PLC.cs)
+            _plc = new Plc(_connectionType, this.IpAddress, _rack, _slot);
 
-            // var client = new S7.Net.Plc(CpuType.S71200, this.IpAddress, 0, 1);
-            // await client.OpenAsync();
+            try
+            {
+                await _plc.OpenAsync();
 
-            IsConnected = true;
-            return IsConnected;
+                IsConnected = _plc.IsConnected;
+                return IsConnected;
+            }
+            catch (Exception ex)
+            {
+                IsConnected = false;
+                Console.WriteLine($"Errore PLC Siemens ({this.IpAddress}): {ex.Message}");
+                return false;
+            }
         }
 
-        public async Task DisconnectAsync()
+        public Task DisconnectAsync() 
         {
-            // Logica di disconnessione Siemens
+            if (_plc != null && _plc.IsConnected)
+            {
+                _plc.Close();
+            }
+
             IsConnected = false;
+
+            return Task.CompletedTask;
         }
 
         public async Task<object> ReadVariableAsync(string variableName)
@@ -67,6 +77,5 @@ namespace HMI.ExternalConnection.PLCs
             // Logica di scrittura specifica per Siemens
             return true;
         }
-
     }
 }
