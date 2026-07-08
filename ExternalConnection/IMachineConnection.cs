@@ -5,8 +5,7 @@ using HMI.Models;
 
 namespace HMI.ExternalConnection
 {
-    internal interface IMachineConnection
-    {
+
         public interface IMachineConnection
         {
             // Proprietà di stato
@@ -25,5 +24,5 @@ namespace HMI.ExternalConnection
 
             event EventHandler ConnectionLost;
         }
-    }
+    
 }
