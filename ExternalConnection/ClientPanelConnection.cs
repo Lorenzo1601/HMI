@@ -9,8 +9,8 @@ namespace HMI.ExternalConnection
     {
         private readonly string _serverHmiIp;
         public bool IsConnected { get; private set; }
-
         public event EventHandler<DataChangedEventArgs> OnDataChanged;
+        public event EventHandler ConnectionLost;
 
         public ClientPanelConnection(string serverHmiIp)
         {
@@ -44,5 +44,19 @@ namespace HMI.ExternalConnection
             // Sarà poi il Server a scriverlo fisicamente nel PLC.
             return true;
         }
+
+        private void CheckServerStatus()
+        {
+            // ... logica fittizia in cui ti accorgi che il Server HMI è spento
+            bool serverMorto = true;
+
+            if (serverMorto)
+            {
+                this.IsConnected = false;
+                // Avviso l'applicazione che ho perso il Server
+                ConnectionLost?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
     }
 }

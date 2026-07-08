@@ -22,6 +22,8 @@ namespace HMI.ExternalConnection
 
             // Evento scatenato quando il valore di una variabile cambia (utile per aggiornare la UI)
             event EventHandler<DataChangedEventArgs> OnDataChanged;
+
+            event EventHandler ConnectionLost;
         }
     }
 }
