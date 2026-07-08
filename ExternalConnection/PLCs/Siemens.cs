@@ -15,8 +15,17 @@ namespace HMI.ExternalConnection.PLCs
         private CpuType _connectionType;
         private short _rack;
         private short _slot;
+        private Plc _plc;
+        public enum DataType
+        {
+            Input = 129,
+            Output = 130,
+            Memory = 131,
+            DataBlock = 132,
+            Timer = 29,
+            Counter = 28
+        }
 
-        private Plc _plc; 
 
         // Ho aggiunto Rack e Slot con valori di default 0 e 1 (per S7-1200/1500)
         public Siemens(string IpAddress, int IpPort, CpuType plcType, short rack = 0, short slot = 1)
