@@ -10,6 +10,7 @@ namespace HMI.ExternalConnection.PLCs
     {
         public bool IsConnected { get; private set; }
         public event EventHandler<DataChangedEventArgs> OnDataChanged;
+        public event EventHandler ConnectionLost;
 
         public Siemens(string IpAddress, int IpPort) : base(IpAddress, IpPort)
         {

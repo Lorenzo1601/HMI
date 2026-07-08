@@ -15,6 +15,7 @@ namespace HMI
         // Variabili globali accessibili da tutte le tue finestre (es. App.Connessione.WriteVariableAsync...)
         public static IMachineConnection Connection { get; private set; }
         public static IHubContext<HmiHub> SignalRContext { get; private set; }
+        private static bool _monitoringMasterConnection = false;
 
         // --- CONFIGURAZIONE PANNELLO E RIDONDANZA ---
         private static bool _isAttualmenteServer = false;
@@ -22,18 +23,23 @@ namespace HMI
         // 1 = Master (Parte come Server)
         // 2 = Primo Backup (Parte come Client, se cade la rete subentra in 0 secondi)
         // 3 = Secondo Backup (Parte come Client, se cade la rete aspetta 5 secondi prima di agire)
-        public static int MiaPriorita = 1; // IN PRODUZIONE: Leggilo da un file config (.json o .ini)
+        public static int Priority = 1; // IN PRODUZIONE: Leggilo da un file config (.json o .ini)
 
-        // Indirizzi IP dei pannelli HMI (per la rete locale tra PC)
-        private static string _ipServerPrincipale = "192.168.0.50";
-        private static string _ipServerSecondario = "192.168.0.51";
+        private static readonly string[] _listaPannelliIp = new string[]
+        {
+            "192.168.0.50", // Priorità 1 (Master)
+            "192.168.0.51", // Priorità 2
+            "192.168.0.52", // Priorità 3
+            "192.168.0.53", // Priorità 4
+            "192.168.0.54"  // Priorità 5
+        };
 
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
 
             // Definisco il ruolo iniziale in base alla priorità configurata per questa macchina
-            _isAttualmenteServer = (MiaPriorita == 1);
+            _isAttualmenteServer = (Priority == 1);
 
             OpenConnection();
         }
@@ -78,7 +84,7 @@ namespace HMI
                 // ==========================================
                 // MODALITÀ CLIENT: Mi connetto al Server HMI
                 // ==========================================
-                string ipTarget = ipServerForzato ?? _ipServerPrincipale;
+                string ipTarget = ipServerForzato ?? _listaPannelliIp[0];
                 Connection = new ClientPanelConnection(ipTarget);
             }
 
@@ -97,41 +103,98 @@ namespace HMI
         // ==========================================
         private static async void FailOverConnection(object sender, EventArgs e)
         {
-            if (_isAttualmenteServer)
+            if(_isAttualmenteServer)
             {
-                // Se ero già il server, vuol dire che si è tranciato il cavo fisico con il PLC
                 MessageBox.Show("Allarme: Collegamento fisico con i PLC interrotto!");
                 return;
             }
 
-            // Se sono qui, ero un Client e ho perso il collegamento col pannello Server principale.
+            // Calcolo quanto devo aspettare in base a chi sono.
+            // Priorità 2 aspetta 0 ms. Priorità 3 aspetta 5000 ms. Priorità 4 aspetta 10000 ms, ecc.
+            int tempoDiAttesa = (Priority - 2) * 5000;
 
-            if (MiaPriorita == 2)
+            if (tempoDiAttesa > 0)
             {
-                // Sono il primo backup: divento subito io il Server e mi collego ai PLC
+                await Task.Delay(tempoDiAttesa);
+            }
+
+            bool foundSuperiorServer = false;
+
+            // Faccio un ciclo per testare SOLO i pannelli più importanti di me.
+            // Se io ho Priorità 4, testerò l'indice 0, poi l'1, poi il 2.
+            for (int i = 0; i < Priority - 1; i++)
+            {
+                string testingIp = _listaPannelliIp[i];
+
+                var testConnection = new ClientPanelConnection(testingIp);
+                bool answer = await testConnection.ConnectAsync();
+
+                if (answer)
+                {
+                    // Ottimo! Qualcuno di più importante di me è diventato il Server.
+                    await testConnection.DisconnectAsync();
+                    OpenConnection(testingIp);
+                    foundSuperiorServer = true;
+                    break; // Esco dal ciclo for, ho finito!
+                }
+            }
+
+            // Se ho provato tutti quelli sopra di me e NESSUNO ha risposto... tocca a me!
+            if (!foundSuperiorServer)
+            {
                 _isAttualmenteServer = true;
                 OpenConnection();
             }
-            else if (MiaPriorita == 3)
+
+            // In ogni caso, inizio a spiare se un giorno tornerà il Master (Priorità 1)
+            MonitoringMasterConnection();
+        }
+
+        // ==========================================
+        // FAILBACK: ATTESA DEL RITORNO DEL MASTER
+        // ==========================================
+        private static async void MonitoringMasterConnection()
+        {
+            if (Priority == 1 || _monitoringMasterConnection) return;
+
+            _monitoringMasterConnection = true;
+
+            while (true)
             {
-                // Sono il secondo backup: aspetto 5 secondi per dare il tempo al Pannello 2 di fare lo switch
-                await Task.Delay(5000);
+                await Task.Delay(5000); // Controllo ogni 5 secondi
 
-                // Faccio un "ping" di prova verso il Pannello 2 per vedere se lui è diventato il Server
-                var testConnection = new ClientPanelConnection(_ipServerSecondario);
-                bool pannello2Risponde = await testConnection.ConnectAsync();
-
-                if (pannello2Risponde)
+                try
                 {
-                    // Ok, il Pannello 2 ha preso le redini dell'impianto. Mi collego a lui come Client.
-                    await testConnection.DisconnectAsync();
-                    OpenConnection(_ipServerSecondario);
+                    // Verifico se c'è un pannello vivo che ha una priorità MIGLIORE della mia
+                    for (int i = 0; i < Priority - 1; i++)
+                    {
+                        string testingIp = _listaPannelliIp[i];
+                        var testConnection = new ClientPanelConnection(testingIp);
+
+                        if (await testConnection.ConnectAsync())
+                        {
+                            // Evviva, un fratello maggiore è tornato online!
+                            await testConnection.DisconnectAsync();
+
+                            _isAttualmenteServer = false;
+
+                            if (Connection != null)
+                            {
+                                Connection.ConnectionLost -= FailOverConnection;
+                                await Connection.DisconnectAsync();
+                            }
+
+                            // Mi ricollego al pannello più importante che ho trovato
+                            OpenConnection(testingIp);
+
+                            _monitoringMasterConnection = false;
+                            return; // Esco definitivamente dalla funzione (il while si rompe)
+                        }
+                    }
                 }
-                else
+                catch
                 {
-                    // Sia il Pannello 1 che il Pannello 2 sono morti. Divento io il Server!
-                    _isAttualmenteServer = true;
-                    OpenConnection();
+                    // Ignoro gli errori e riprovo al prossimo giro
                 }
             }
         }
