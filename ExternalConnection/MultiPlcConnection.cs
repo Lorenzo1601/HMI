@@ -76,6 +76,15 @@ namespace HMI.ExternalConnection
             throw new Exception($"PLC {nomePlc} non trovato.");
         }
 
+        public async Task<T> ReadClassAsync<T>(string nomePlc, int db, int startByteAdr = 0) where T : class, new()//Al momento solo per driver siemens
+        {
+            if (_plcs.TryGetValue(nomePlc, out var plc))
+            {
+                return await plc.ReadClassAsync<T>(db, startByteAdr);
+            }
+            throw new Exception($"PLC {nomePlc} non trovato.");
+        }
+
         public async Task<bool> WriteVariableAsync(string variableName, object value)
         {
             var (nomePlc, variabileVera) = EstraiPlcEVariabile(variableName);
