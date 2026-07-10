@@ -6,6 +6,7 @@ namespace HMI.Function
 {
     internal class DatabaseConnectionManager
     {
-        private List<Models.DatabaseConnectionModel> connections = new List<Models.DatabaseConnectionModel>();
+        private List<Models.DatabaseConnectionModel> _connections = new List<Models.DatabaseConnectionModel>();
+
     }
 }
