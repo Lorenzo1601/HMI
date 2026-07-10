@@ -6,7 +6,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.SignalR;
 using HMI.ExternalConnection;
 using HMI.ExternalConnection.PLCs;
-using HMI.ServerServices; // Assicurati che questo sia il namespace dove hai creato HmiHub.cs
+using HMI.ServerServices;
+using HMI.Function; // Assicurati che questo sia il namespace dove hai creato HmiHub.cs
 
 namespace HMI
 {
@@ -23,7 +24,7 @@ namespace HMI
         // 1 = Master (Parte come Server)
         // 2 = Primo Backup (Parte come Client, se cade la rete subentra in 0 secondi)
         // 3 = Secondo Backup (Parte come Client, se cade la rete aspetta 5 secondi prima di agire)
-        public static int Priority = 1; // IN PRODUZIONE: Leggilo da un file config (.json o .ini)
+        public static int Priority = 1; 
 
         private static readonly string[] _listaPannelliIp = new string[]
         {
@@ -38,6 +39,9 @@ namespace HMI
         {
             base.OnStartup(e);
 
+            AppConfigurationManager manager = new AppConfigurationManager();
+            List<int> config = manager.LoadConfiguration();
+            Priority = config[0];
             // Definisco il ruolo iniziale in base alla priorità configurata per questa macchina
             _isAttualmenteServer = (Priority == 1);
 
