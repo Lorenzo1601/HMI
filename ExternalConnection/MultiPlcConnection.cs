@@ -12,8 +12,8 @@ namespace HMI.ExternalConnection
 
         public bool IsConnected { get; private set; }
 
-        public event EventHandler<DataChangedEventArgs> OnDataChanged;
-        public event EventHandler ConnectionLost;
+        public event EventHandler<DataChangedEventArgs>? OnDataChanged;
+        public event EventHandler? ConnectionLost;
 
         // Metodo per aggiungere i PLC al nostro gestore
         public void AddPlc(string nome, IMachineConnection PlcConnection)
@@ -65,7 +65,7 @@ namespace HMI.ExternalConnection
             return (parti[0], string.Join(".", parti[1..])); // (NomePlc, Variabile)
         }
 
-        public async Task<object> ReadVariableAsync(string variableName)
+        public async Task<object?> ReadVariableAsync(string variableName)
         {
             var (nomePlc, variabileVera) = EstraiPlcEVariabile(variableName);
 
@@ -76,7 +76,7 @@ namespace HMI.ExternalConnection
             throw new Exception($"PLC {nomePlc} non trovato.");
         }
 
-        public async Task<T> ReadClassAsync<T>(string nomePlc, int db, int startByteAdr = 0) where T : class, new()//Al momento solo per driver siemens
+        public async Task<T?> ReadClassAsync<T>(string nomePlc, int db, int startByteAdr = 0) where T : class, new()//Al momento solo per driver siemens
         {
             if (_plcs.TryGetValue(nomePlc, out var plc))
             {

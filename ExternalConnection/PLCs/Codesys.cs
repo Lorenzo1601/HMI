@@ -8,8 +8,8 @@ namespace HMI.ExternalConnection.PLCs
     internal class Codesys : PLC, IMachineConnection
     {
         public bool IsConnected { get; private set; }
-        public event EventHandler<DataChangedEventArgs> OnDataChanged;
-        public event EventHandler ConnectionLost;
+        public event EventHandler<DataChangedEventArgs>? OnDataChanged;
+        public event EventHandler? ConnectionLost;
 
         public Codesys(string IpAddress, int IpPort) : base(IpAddress, IpPort)
         {
@@ -32,7 +32,7 @@ namespace HMI.ExternalConnection.PLCs
             IsConnected = false;
         }
 
-        public async Task<object> ReadVariableAsync(string variableName)
+        public async Task<object?> ReadVariableAsync(string variableName)
         {
             // Qui in futuro metterai il codice di lettura
             return 0;
@@ -41,7 +41,10 @@ namespace HMI.ExternalConnection.PLCs
         public async Task<bool> WriteVariableAsync(string variableName, object value)
         {
             // Qui in futuro metterai il codice di scrittura
+            OnDataChanged?.Invoke(this, new DataChangedEventArgs { VariableName = variableName, NewValue = value });
             return true;
         }
+
+        private void RaiseConnectionLost() => ConnectionLost?.Invoke(this, EventArgs.Empty);
     }
 }

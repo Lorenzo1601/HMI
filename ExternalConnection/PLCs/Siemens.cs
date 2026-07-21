@@ -9,13 +9,13 @@ namespace HMI.ExternalConnection.PLCs
     {
         public bool IsConnected { get; private set; }
 
-        public event EventHandler<DataChangedEventArgs> OnDataChanged;
-        public event EventHandler ConnectionLost;
+        public event EventHandler<DataChangedEventArgs>? OnDataChanged;
+        public event EventHandler? ConnectionLost;
 
         private CpuType _connectionType;
         private short _rack;
         private short _slot;
-        private Plc _plc;
+        private Plc? _plc;
         public enum DataType
         {
             Input = 129,
@@ -70,6 +70,7 @@ namespace HMI.ExternalConnection.PLCs
             {
                 IsConnected = false;
                 Console.WriteLine($"Errore PLC Siemens ({this.IpAddress}): {ex.Message}");
+                ConnectionLost?.Invoke(this, EventArgs.Empty);
                 return false;
             }
         }
@@ -86,7 +87,7 @@ namespace HMI.ExternalConnection.PLCs
             return Task.CompletedTask;
         }
 
-        public async Task<object> ReadVariableAsync(string variableName)
+        public async Task<object?> ReadVariableAsync(string variableName)
         {
             if (_plc == null || !IsConnected)
             {
@@ -100,7 +101,7 @@ namespace HMI.ExternalConnection.PLCs
                 {
                     // S7.Net permette di leggere una variabile passando direttamente l'indirizzo testuale (es. "DB1.DBW20") [cite: 5567]
                     // Il metodo restituisce direttamente un object [cite: 5565]
-                    object result = _plc.Read(variableName);
+                    object? result = _plc.Read(variableName);
 
                     if (result == null)
                     {
@@ -118,7 +119,7 @@ namespace HMI.ExternalConnection.PLCs
 #pragma warning restore CS8603 // Possibile restituzione di riferimento Null.
         }
 
-        public async Task<T> ReadClassAsync<T>(int db, int startByteAdr = 0) where T : class, new()
+        public async Task<T?> ReadClassAsync<T>(int db, int startByteAdr = 0) where T : class, new()
         {
             if (_plc == null || !IsConnected)
             {

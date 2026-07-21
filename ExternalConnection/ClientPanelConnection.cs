@@ -1,81 +1,92 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
+using System.Text.Json;
 using HMI.Models;
 using Microsoft.AspNetCore.SignalR.Client;
 
-namespace HMI.ExternalConnection
+namespace HMI.ExternalConnection;
+
+internal sealed class ClientPanelConnection : IMachineConnection
 {
-    internal class ClientPanelConnection : IMachineConnection
+    private readonly HubConnection _hubConnection;
+
+    public ClientPanelConnection(string serverHmiIp, int port = 5000)
     {
-        private readonly string _serverHmiIp;
-        private HubConnection _hubConnection;
-        public bool IsConnected { get; private set; }
-        public event EventHandler<DataChangedEventArgs> OnDataChanged;
-        public event EventHandler ConnectionLost;
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl($"http://{serverHmiIp}:{port}/hmihub")
+            .WithAutomaticReconnect()
+            .Build();
 
-        public ClientPanelConnection(string serverHmiIp)
+        _hubConnection.Closed += _ =>
         {
-            _serverHmiIp = serverHmiIp;
-
-            // 1. Configuro la connessione SignalR puntando al pannello Server
-            _hubConnection = new HubConnectionBuilder()
-                .WithUrl($"http://{_serverHmiIp}:5000/hmihub")
-                .WithAutomaticReconnect() // Opzionale: tenta di riconnettersi da solo
-                .Build();
-
-            // 2. 
-            // Dico a SignalR cosa fare se SI ACCORGE da solo che la rete è caduta
-            _hubConnection.Closed += async (error) =>
-            {
-                this.IsConnected = false;
-                // Scateno il MIO evento per avvisare il Failover!
-                ConnectionLost?.Invoke(this, EventArgs.Empty);
-            };
-
-            // 3. Ascolto i dati in arrivo dal Server (se cambiano)
-            _hubConnection.On<string, object>("RiceviNuovoDato", (nomeVariabile, valore) =>
-            {
-                OnDataChanged?.Invoke(this, new DataChangedEventArgs { VariableName = nomeVariabile, NewValue = valore });
-            });
-        }
-
-        public async Task<bool> ConnectAsync()
+            IsConnected = false;
+            ConnectionLost?.Invoke(this, EventArgs.Empty);
+            return Task.CompletedTask;
+        };
+        _hubConnection.Reconnected += _ =>
         {
-            try
-            {
-                // Avvio la connessione. 
-                // NON SERVE far partire nessun "MonitoraConnessioneRete()"!
-                await _hubConnection.StartAsync();
-                this.IsConnected = true;
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        public async Task DisconnectAsync()
+            IsConnected = true;
+            return Task.CompletedTask;
+        };
+        _hubConnection.On<string, JsonElement>("RiceviNuovoDato", (name, value) =>
         {
-            await _hubConnection.StopAsync();
-            this.IsConnected = false;
-        }
+            OnDataChanged?.Invoke(this, new DataChangedEventArgs { VariableName = name, NewValue = ConvertJson(value) ?? new object() });
+        });
+    }
 
-        public async Task<object> ReadVariableAsync(string variableName)
-        {
-            // Invia una richiesta HTTP/SignalR al pannello Server per farsi dare il valore
-            // Es: return await _httpClient.GetAsync($"http://{_serverHmiIp}/api/read/{variableName}");
-            return 0;
-        }
+    public bool IsConnected { get; private set; }
+    public event EventHandler<DataChangedEventArgs>? OnDataChanged;
+    public event EventHandler? ConnectionLost;
 
-        public async Task<bool> WriteVariableAsync(string variableName, object value)
+    public async Task<bool> ConnectAsync()
+    {
+        try
         {
-            // Invia una richiesta HTTP/SignalR al pannello Server per scrivergli il valore. 
-            // Sarà poi il Server a scriverlo fisicamente nel PLC.
+            await _hubConnection.StartAsync();
+            IsConnected = true;
             return true;
         }
-
-
+        catch
+        {
+            IsConnected = false;
+            return false;
+        }
     }
+
+    public async Task DisconnectAsync()
+    {
+        if (_hubConnection.State != HubConnectionState.Disconnected)
+        {
+            await _hubConnection.StopAsync();
+        }
+        IsConnected = false;
+    }
+
+    public async Task<object?> ReadVariableAsync(string variableName)
+    {
+        if (!IsConnected)
+        {
+            return null;
+        }
+        var value = await _hubConnection.InvokeAsync<JsonElement>("ReadVariableFromClient", variableName);
+        return ConvertJson(value);
+    }
+
+    public async Task<bool> WriteVariableAsync(string variableName, object value)
+    {
+        if (!IsConnected)
+        {
+            return false;
+        }
+        return await _hubConnection.InvokeAsync<bool>("WriteVariableFromClient", variableName, value);
+    }
+
+    private static object? ConvertJson(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.True => true,
+        JsonValueKind.False => false,
+        JsonValueKind.Number when value.TryGetInt32(out var integer) => integer,
+        JsonValueKind.Number when value.TryGetDouble(out var number) => number,
+        JsonValueKind.String => value.GetString(),
+        JsonValueKind.Null or JsonValueKind.Undefined => null,
+        _ => value.ToString()
+    };
 }

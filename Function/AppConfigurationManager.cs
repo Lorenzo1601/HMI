@@ -18,9 +18,14 @@ namespace HMI.Function
         {
             if (File.Exists("Settings.ini"))
             {
-                StreamReader reader = new StreamReader("Settings.ini");
-                int Priority = int.Parse(reader.ReadLine().Split(':')[1].Trim());
-                return new List<int> { Priority };
+                using StreamReader reader = new StreamReader("Settings.ini");
+                string? line = reader.ReadLine();
+                if (line is not null && line.Split(':') is { Length: > 1 } parts && int.TryParse(parts[1].Trim(), out int priority))
+                {
+                    return new List<int> { priority };
+                }
+
+                return new List<int> { 1 };
             }
             else
             {
