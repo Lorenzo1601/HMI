@@ -2,9 +2,9 @@
 using System.Collections.Generic;
 using System.Text;
 using System.Threading.Tasks;
+using HMI.Models; // Necessario per DataChangedEventArgs
 using Opc.Ua;
 using Opc.Ua.Client;
-using HMI.Models; // Necessario per DataChangedEventArgs
 
 namespace HMI.ExternalConnection.PLCs
 {
@@ -33,13 +33,17 @@ namespace HMI.ExternalConnection.PLCs
                 // 1. Inizializzazione rigorosa della configurazione
                 _appConfig = new ApplicationConfiguration
                 {
-                    ApplicationName = _config.ApplicationName,
-                    ApplicationUri = Utils.Format(@"urn:{0}:{1}", System.Net.Dns.GetHostName(), _config.ApplicationName),
+                    ApplicationName = _config.ApplicationName ?? "HMI_Client",
+                    ApplicationUri = Utils.Format(@"urn:{0}:{1}", System.Net.Dns.GetHostName(), _config.ApplicationName ?? "HMI_Client"),
                     ApplicationType = ApplicationType.Client,
                     SecurityConfiguration = new SecurityConfiguration
                     {
                         ApplicationCertificate = new CertificateIdentifier { StoreType = "Directory", StorePath = "%CommonApplicationData%/OPC Foundation/CertificateStores/MachineDefault" },
                         TrustedPeerCertificates = new CertificateTrustList { StoreType = "Directory", StorePath = "%CommonApplicationData%/OPC Foundation/CertificateStores/UA Applications" },
+
+                        // FIX: Aggiunto TrustedIssuerCertificates richiesto dalla libreria
+                        TrustedIssuerCertificates = new CertificateTrustList { StoreType = "Directory", StorePath = "%CommonApplicationData%/OPC Foundation/CertificateStores/UA Certificate Authorities" },
+
                         RejectedCertificateStore = new CertificateTrustList { StoreType = "Directory", StorePath = "%CommonApplicationData%/OPC Foundation/CertificateStores/RejectedCertificates" },
                         AutoAcceptUntrustedCertificates = _config.AutoAcceptUntrustedCertificates
                     },
@@ -55,14 +59,26 @@ namespace HMI.ExternalConnection.PLCs
                     _appConfig.CertificateValidator.CertificateValidation += (s, e) => { e.Accept = true; };
                 }
 
+                // Assicuriamoci che l'URL abbia il prefisso corretto
+                string serverUrl = _config.ServerUrl.StartsWith("opc.tcp://")
+                    ? _config.ServerUrl
+                    : "opc.tcp://" + _config.ServerUrl;
+
                 // 2. Creazione rigorosa dell'Endpoint
-                // FIX CS1503: questa versione della libreria richiede l'ApplicationConfiguration
-                // come primo parametro dell'overload SelectEndpoint(ApplicationConfiguration, string, bool, int)
                 EndpointDescription selectedEndpoint = CoreClientUtils.SelectEndpoint(
                     _appConfig,
-                    _config.ServerUrl,
+                    serverUrl,
                     _config.SecurityMode != MessageSecurityMode.None,
                     15000);
+
+                // FIX FONDAMENTALE: Sovrascrive l'hostname ritornato dal server con l'IP inserito dall'utente
+                var userUri = new Uri(serverUrl);
+                var endpointUri = new Uri(selectedEndpoint.EndpointUrl);
+                if (userUri.Host != endpointUri.Host)
+                {
+                    var builder = new UriBuilder(selectedEndpoint.EndpointUrl) { Host = userUri.Host };
+                    selectedEndpoint.EndpointUrl = builder.ToString();
+                }
 
                 EndpointConfiguration endpointConfiguration = EndpointConfiguration.Create(_appConfig);
                 ConfiguredEndpoint endpoint = new ConfiguredEndpoint(null, selectedEndpoint, endpointConfiguration);
@@ -75,31 +91,30 @@ namespace HMI.ExternalConnection.PLCs
                 }
                 else
                 {
-                    // FIX CS1503: il costruttore UserIdentity(string, byte[]) vuole la password
-                    // come byte[] (UTF8), non come string
-                    userIdentity = new UserIdentity(_config.Username, Encoding.UTF8.GetBytes(_config.Password));
+                    // FIX CS1503 RIPRISTINATO: Convertiamo la password in byte[] (UTF8)
+                    userIdentity = new UserIdentity(_config.Username, System.Text.Encoding.UTF8.GetBytes(_config.Password));
                 }
 
-                // 4. Creazione Sessione (forziamo l'overload corretto passando i tipi esatti posizionali)
+                // 4. Creazione Sessione
                 _session = await Session.Create(
                     _appConfig,                                 // ApplicationConfiguration
                     endpoint,                                   // ConfiguredEndpoint
                     false,                                      // updateBeforeConnect
-                    _config.ApplicationName,                    // sessionName
-                    _config.SessionTimeout,                     // sessionTimeout
+                    _config.ApplicationName ?? "HMI_Session",   // sessionName
+                    _config.SessionTimeout == 0 ? 60000 : _config.SessionTimeout, // sessionTimeout
                     userIdentity,                               // identity
-                    (IList<string>)null                         // preferredLocales (castato per evitare ambiguità)
+                    (IList<string>)null                         // preferredLocales
                 );
 
-                _session.KeepAliveInterval = _config.KeepAliveInterval;
+                _session.KeepAliveInterval = _config.KeepAliveInterval == 0 ? 5000 : _config.KeepAliveInterval;
                 _session.KeepAlive += Session_KeepAlive;
 
                 return true;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[OPC UA Error] Errore di connessione: {ex.Message}");
-                return false;
+                // Buttiamo fuori l'eccezione vera per poterla leggere nell'interfaccia
+                throw new Exception($"Errore OPC UA dettagliato: {ex.Message}", ex);
             }
         }
 
@@ -231,57 +246,54 @@ namespace HMI.ExternalConnection.PLCs
             }
         }
 
-        /// <summary>
-        /// Esplora i nodi figli di un nodo specifico. Se non viene passato nulla, parte dalla root (ObjectsFolder).
-        /// </summary>
-        public async Task<List<ReferenceDescription>> BrowseNodeAsync(string parentNodeId = null)
+        public async Task<List<ReferenceDescription>> BrowseNodesAsync(string parentNodeId = null)
         {
-            if (!IsConnected) return new List<ReferenceDescription>();
+            if (!IsConnected)
+            {
+                return new List<ReferenceDescription>();
+            }
 
             return await Task.Run(() =>
             {
-                var nodesList = new List<ReferenceDescription>();
+                var result = new List<ReferenceDescription>();
+
                 try
                 {
-                    // Se non specifichiamo il nodo, partiamo dalla Root standard di OPC UA (ObjectsFolder)
-                    NodeId startNode = string.IsNullOrEmpty(parentNodeId)
-                        ? ObjectIds.ObjectsFolder
-                        : new NodeId(parentNodeId);
-
                     var browseDescription = new BrowseDescription
                     {
-                        NodeId = startNode,
+                        NodeId = string.IsNullOrEmpty(parentNodeId)
+                            ? ObjectIds.ObjectsFolder
+                            : NodeId.Parse(parentNodeId),
+
                         BrowseDirection = BrowseDirection.Forward,
                         ReferenceTypeId = ReferenceTypeIds.HierarchicalReferences,
                         IncludeSubtypes = true,
-                        // Vogliamo vedere sia le cartelle (Object) che le variabili (Variable)
                         NodeClassMask = (uint)(NodeClass.Object | NodeClass.Variable),
                         ResultMask = (uint)BrowseResultMask.All
                     };
-
-                    var nodesToBrowse = new BrowseDescriptionCollection { browseDescription };
 
                     _session.Browse(
                         null,
                         null,
                         0,
-                        nodesToBrowse,
+                        new BrowseDescriptionCollection { browseDescription },
                         out BrowseResultCollection results,
-                        out DiagnosticInfoCollection diagnosticInfos
-                    );
+                        out DiagnosticInfoCollection diagnosticInfos);
 
-                    if (results != null && results.Count > 0 && results[0].References != null)
+                    if (results != null && results.Count > 0)
                     {
-                        // Aggiungiamo i risultati alla lista
-                        nodesList.AddRange(results[0].References);
+                        foreach (var reference in results[0].References)
+                        {
+                            result.Add(reference);
+                        }
                     }
                 }
-                catch (Exception ex)
+                catch
                 {
-                    Console.WriteLine($"[OPC UA Browse Error]: {ex.Message}");
+                    // Ignora errori di browse
                 }
 
-                return nodesList;
+                return result;
             });
         }
 

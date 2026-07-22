@@ -626,13 +626,22 @@ public sealed class PlcConnectionDefinition
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = "PLC_1";
+
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public PlcDriver Driver { get; set; } = PlcDriver.SiemensS7;
+
     public string Host { get; set; } = "192.168.0.10";
     public int Port { get; set; } = 102;
     public string CpuType { get; set; } = "S71500";
     public short Rack { get; set; }
     public short Slot { get; set; } = 1;
+
+    // Configurazione OPC UA
+    public string OpcUaServerUrl { get; set; } = "opc.tcp://127.0.0.1:4840";
+    public bool OpcUaUseAnonymous { get; set; } = true;
+    public string OpcUaUsername { get; set; } = string.Empty;
+    public string OpcUaPassword { get; set; } = string.Empty;
+    public bool OpcUaAutoAcceptCertificates { get; set; } = true;
 
     public override string ToString() => Name;
 }
@@ -860,7 +869,8 @@ public enum PlcDriver
 {
     Simulator,
     SiemensS7,
-    Codesys
+    Codesys,
+    OpcUa
 }
 
 public enum TagDataType

@@ -141,21 +141,40 @@ public sealed class HmiRuntimeSession
     private MultiPlcConnection BuildDirectConnection(HmiProject project)
     {
         var multi = new MultiPlcConnection();
+
         foreach (var definition in project.PlcConnections)
         {
             IMachineConnection connection = definition.Driver switch
             {
                 PlcDriver.Simulator => new Simulator(),
-                PlcDriver.Codesys => new Codesys(definition.Host, definition.Port),
+
+                PlcDriver.Codesys => new Codesys(
+                    definition.Host,
+                    definition.Port),
+
+                PlcDriver.OpcUa => new OpcUaConnection(
+                    new OpcUaConfig
+                    {
+                        ServerUrl = definition.OpcUaServerUrl,
+                        UseAnonymous = definition.OpcUaUseAnonymous,
+                        Username = definition.OpcUaUsername,
+                        Password = definition.OpcUaPassword,
+                        AutoAcceptUntrustedCertificates = definition.OpcUaAutoAcceptCertificates
+                    }),
+
                 _ => new Siemens(
                     definition.Host,
                     definition.Port,
-                    Enum.TryParse<CpuType>(definition.CpuType, true, out var cpuType) ? cpuType : CpuType.S71500,
+                    Enum.TryParse<CpuType>(definition.CpuType, true, out var cpuType)
+                        ? cpuType
+                        : CpuType.S71500,
                     definition.Rack,
                     definition.Slot)
             };
+
             multi.AddPlc(definition.Name, connection);
         }
+
         return multi;
     }
 

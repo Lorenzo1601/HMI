@@ -827,6 +827,16 @@
                                             <StackPanel Grid.Column="2"><TextBlock Text="Slot" Style="{StaticResource FieldLabel}"/><TextBox x:Name="PlcSlotBox"/></StackPanel>
                                         </Grid>
                                     </StackPanel>
+                                    <StackPanel x:Name="PlcOpcUaFields" Visibility="Collapsed">
+                                        <TextBlock Text="URL server OPC UA" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox x:Name="PlcOpcUaUrlBox"/>
+                                        <CheckBox x:Name="PlcOpcUaAnonymousCheck" Content="Usa accesso anonimo" IsChecked="True" Foreground="{StaticResource TextBrush}" Margin="0,10,0,4"/>
+                                        <TextBlock Text="Username" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox x:Name="PlcOpcUaUsernameBox"/>
+                                        <TextBlock Text="Password" Style="{StaticResource FieldLabel}"/>
+                                        <PasswordBox x:Name="PlcOpcUaPasswordBox"  Background="#0D151E" Foreground="{StaticResource TextBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1"  Padding="9,7"  CaretBrush="White" MinHeight="34"/>
+                                        <CheckBox x:Name="PlcOpcUaAcceptCertCheck" Content="Accetta certificati non attendibili" IsChecked="True" Foreground="{StaticResource TextBrush}" Margin="0,10,0,4"/>
+                                    </StackPanel>
                                     <TextBlock x:Name="PlcSimulatorInfo" Text="Il simulatore non richiede parametri di rete." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,12,0,0" Visibility="Collapsed"/>
                                     <StackPanel Orientation="Horizontal" Margin="0,14,0,8">
                                         <Button Content="Nuovo" Style="{StaticResource ToolbarButton}" Click="NewPlc_Click"/>
@@ -853,8 +863,17 @@
                                     <TextBlock Text="DEFINIZIONE TAG" Style="{StaticResource SectionLabel}" Margin="0,10,0,3"/>
                                     <TextBlock Text="Nome tag" Style="{StaticResource FieldLabel}"/><TextBox x:Name="TagNameBox"/>
                                     <TextBlock Text="Cartella" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="TagFolderCombo" DisplayMemberPath="DisplayPath" SelectedValuePath="Id"/>
-                                    <TextBlock Text="PLC" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="TagPlcCombo" DisplayMemberPath="Name" SelectedValuePath="Id"/>
-                                    <TextBlock Text="Indirizzo variabile" Style="{StaticResource FieldLabel}"/><TextBox x:Name="TagAddressBox"/>
+                                    <TextBlock Text="PLC" Style="{StaticResource FieldLabel}"/>
+                                    <ComboBox x:Name="TagPlcCombo" DisplayMemberPath="Name" SelectedValuePath="Id" SelectionChanged="TagPlcCombo_SelectionChanged"/>
+                                    <TextBlock Text="Indirizzo variabile" Style="{StaticResource FieldLabel}"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition/>
+                                            <ColumnDefinition Width="110"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox x:Name="TagAddressBox" Grid.Column="0"/>
+                                        <Button x:Name="TagBrowseOpcUaButton" Grid.Column="1" Content="Browse" Style="{StaticResource ToolbarButton}" Margin="8,0,0,0" Click="TagBrowseOpcUaButton_Click" Visibility="Collapsed"/>
+                                    </Grid>
                                     <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="10"/><ColumnDefinition/></Grid.ColumnDefinitions>
                                         <StackPanel><TextBlock Text="Tipo dato" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="TagDataTypeCombo"/></StackPanel>
                                         <StackPanel Grid.Column="2"><TextBlock Text="Accesso" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="TagAccessCombo"/></StackPanel>

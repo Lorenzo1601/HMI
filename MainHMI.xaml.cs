@@ -12,10 +12,14 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using System.Windows.Threading;
+using HMI.ExternalConnection;
+using HMI.ExternalConnection.PLCs;
 using HMI.Function;
 using HMI.Models;
 using Microsoft.Win32;
+using Opc.Ua.Client;
 using S7.Net;
+using System.Linq;
 
 namespace HMI;
 
@@ -143,6 +147,256 @@ public partial class MainWindow : Window
         };
     }
 
+    private void TagPlcCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (TagPlcCombo.SelectedValue is not string plcId)
+        {
+            TagBrowseOpcUaButton.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var plc = _project.PlcConnections.FirstOrDefault(p => p.Id == plcId);
+
+        TagBrowseOpcUaButton.Visibility =
+            plc?.Driver == PlcDriver.OpcUa
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+    }
+
+    private void UpdateTagBrowseButtonVisibility()
+    {
+        if (TagPlcCombo.SelectedValue is not string plcId)
+        {
+            TagBrowseOpcUaButton.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var plc = _project.PlcConnections.FirstOrDefault(p => p.Id == plcId);
+
+        TagBrowseOpcUaButton.Visibility =
+            plc?.Driver == PlcDriver.OpcUa
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+    }
+
+    private async void TagBrowseOpcUaButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (TagPlcCombo.SelectedValue is not string plcId)
+        {
+            return;
+        }
+
+        var plc = _project.PlcConnections.FirstOrDefault(p => p.Id == plcId);
+
+        if (plc is null || plc.Driver != PlcDriver.OpcUa)
+        {
+            return;
+        }
+
+        var config = new OpcUaConfig
+        {
+            ServerUrl = plc.OpcUaServerUrl,
+            UseAnonymous = plc.OpcUaUseAnonymous,
+            Username = plc.OpcUaUsername,
+            Password = plc.OpcUaPassword,
+            AutoAcceptUntrustedCertificates = plc.OpcUaAutoAcceptCertificates,
+            ApplicationName = "HMI Studio",
+            SessionTimeout = 60000,
+            KeepAliveInterval = 5000
+        };
+
+        var connection = new OpcUaConnection(config);
+
+        try
+        {
+            StatusText.Text = "Connessione al server OPC UA in corso...";
+            bool isConnected = await connection.ConnectAsync();
+            if (!isConnected) return;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "Errore OPC UA", MessageBoxButton.OK, MessageBoxImage.Error);
+            StatusText.Text = "Errore di connessione OPC UA";
+            return;
+        }
+
+        StatusText.Text = "Connesso. Esplorazione nodi in corso...";
+
+        // Creazione UI Finestra di Browse in stile scuro
+        var window = new Window
+        {
+            Title = "Esplora Indirizzi OPC UA",
+            Width = 650,
+            Height = 550,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Owner = this,
+            Background = new SolidColorBrush(Color.FromRgb(17, 26, 36)), // Sfondo pannelli HMI
+            WindowStyle = WindowStyle.ToolWindow
+        };
+
+        var grid = new Grid { Margin = new Thickness(14) };
+        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        var tree = new TreeView
+        {
+            Background = new SolidColorBrush(Color.FromRgb(13, 21, 30)),
+            Foreground = Brushes.White,
+            BorderBrush = new SolidColorBrush(Color.FromRgb(38, 53, 69)),
+            BorderThickness = new Thickness(1),
+            Margin = new Thickness(0, 0, 0, 14)
+        };
+        Grid.SetRow(tree, 0);
+        grid.Children.Add(tree);
+
+        var btnPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        Grid.SetRow(btnPanel, 1);
+
+        var btnCancel = new Button
+        {
+            Content = "Annulla",
+            Width = 100,
+            Height = 34,
+            Margin = new Thickness(0, 0, 10, 0),
+            Background = new SolidColorBrush(Color.FromRgb(38, 54, 70)),
+            Foreground = Brushes.White,
+            BorderThickness = new Thickness(0),
+            Cursor = Cursors.Hand
+        };
+        var btnSelect = new Button
+        {
+            Content = "Seleziona",
+            Width = 100,
+            Height = 34,
+            Background = new SolidColorBrush(Color.FromRgb(40, 194, 184)),
+            Foreground = new SolidColorBrush(Color.FromRgb(6, 21, 20)),
+            BorderThickness = new Thickness(0),
+            FontWeight = FontWeights.SemiBold,
+            Cursor = Cursors.Hand
+        };
+
+        btnPanel.Children.Add(btnCancel);
+        btnPanel.Children.Add(btnSelect);
+        grid.Children.Add(btnPanel);
+
+        window.Content = grid;
+
+        // Disconnessione al momento della chiusura della finestra
+        window.Closed += async (s, args) =>
+        {
+            await connection.DisconnectAsync();
+            StatusText.Text = "Disconnesso dal server OPC UA";
+        };
+
+        btnCancel.Click += (s, args) => window.Close();
+
+        btnSelect.Click += (s, args) =>
+        {
+            if (tree.SelectedItem is TreeViewItem selectedItem && selectedItem.Tag is Opc.Ua.ReferenceDescription refDesc)
+            {
+                if (refDesc.NodeClass == Opc.Ua.NodeClass.Variable)
+                {
+                    TagAddressBox.Text = refDesc.NodeId.ToString();
+                    window.DialogResult = true;
+                    window.Close();
+                }
+                else
+                {
+                    MessageBox.Show("Seleziona un nodo di tipo Variabile (icona azzurra). Le cartelle non possono essere associate direttamente a una Tag.", "Selezione non valida", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+            }
+        };
+
+        // Funzione locale ricorsiva per creare gli elementi dell'albero con il Lazy Loading
+        TreeViewItem CreateNodeItem(Opc.Ua.ReferenceDescription node)
+        {
+            bool isVariable = node.NodeClass == Opc.Ua.NodeClass.Variable;
+            string icon = isVariable ? "◆ " : "▰ ";
+            string color = isVariable ? "#28C2B8" : "#F1B24A";
+
+            var headerStack = new StackPanel { Orientation = Orientation.Horizontal };
+            headerStack.Children.Add(new TextBlock { Text = icon, Foreground = (Brush)new BrushConverter().ConvertFromString(color), Margin = new Thickness(0, 0, 5, 0) });
+            headerStack.Children.Add(new TextBlock { Text = $"{node.DisplayName.Text}  ", FontWeight = isVariable ? FontWeights.SemiBold : FontWeights.Normal });
+            headerStack.Children.Add(new TextBlock { Text = $"({node.NodeId})", Foreground = Brushes.Gray, FontSize = 11, VerticalAlignment = VerticalAlignment.Center });
+
+            var item = new TreeViewItem
+            {
+                Header = headerStack,
+                Tag = node,
+                Foreground = Brushes.White,
+                Margin = new Thickness(0, 2, 0, 2)
+            };
+
+            // Se non è una foglia (variabile), aggiungiamo un nodo "fittizio" per far comparire la freccia di espansione
+            if (!isVariable)
+            {
+                item.Items.Add(new TreeViewItem { Header = "Caricamento in corso...", Foreground = Brushes.Gray });
+            }
+
+            item.Expanded += async (s, args) =>
+            {
+                // Evita che l'evento scatti a cascata per i nodi padri
+                if (args.OriginalSource != item) return;
+
+                // Se stiamo espandendo e c'è ancora il nodo fittizio, carichiamo i dati veri dal PLC
+                if (item.Items.Count == 1 && item.Items[0] is TreeViewItem dummy && dummy.Header.ToString().StartsWith("Caricamento"))
+                {
+                    item.Items.Clear();
+                    try
+                    {
+                        var childNodes = await connection.BrowseNodesAsync(node.NodeId.ToString());
+                        foreach (var childNode in childNodes)
+                        {
+                            item.Items.Add(CreateNodeItem(childNode));
+                        }
+
+                        if (item.Items.Count == 0)
+                        {
+                            item.Items.Add(new TreeViewItem { Header = "Nessun elemento", Foreground = Brushes.Gray, IsHitTestVisible = false });
+                        }
+                    }
+                    catch
+                    {
+                        item.Items.Add(new TreeViewItem { Header = "Errore di lettura", Foreground = Brushes.IndianRed, IsHitTestVisible = false });
+                    }
+                }
+            };
+
+            // Doppio clic per auto-selezionare e chiudere (solo sulle variabili)
+            item.MouseDoubleClick += (s, args) =>
+            {
+                // Ignora se il clic è avvenuto sulla freccia di espansione
+                if (args.OriginalSource is FrameworkElement fe && fe.DataContext != item.Header) return;
+
+                if (isVariable)
+                {
+                    TagAddressBox.Text = node.NodeId.ToString();
+                    window.DialogResult = true;
+                    window.Close();
+                    args.Handled = true;
+                }
+            };
+
+            return item;
+        }
+
+        // --- Avvio esplorazione (Caricamento Nodi Radice) ---
+        try
+        {
+            var rootNodes = await connection.BrowseNodesAsync(null); // null punta automaticamente a Root->Objects
+            foreach (var node in rootNodes)
+            {
+                tree.Items.Add(CreateNodeItem(node));
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Impossibile leggere i nodi principali: {ex.Message}", "Errore Browse", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+
+        window.ShowDialog();
+    }
+
     private void LoadProjectIntoEditor()
     {
         _project.Normalize();
@@ -170,6 +424,7 @@ public partial class MainWindow : Window
         UpdateProjectHeader();
         ShowWidgetInspector();
     }
+
 
     private void RefreshCollections()
     {
@@ -5744,29 +5999,49 @@ public partial class MainWindow : Window
     private void SavePlc_Click(object sender, RoutedEventArgs e)
     {
         var name = PlcNameBox.Text.Trim();
+
         if (string.IsNullOrWhiteSpace(name) || name.Contains('.'))
         {
-            MessageBox.Show("Il nome PLC è obbligatorio e non può contenere punti.", "Configurazione PLC", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show("Il nome PLC è obbligatorio e non può contenere punti.",
+                "Configurazione PLC", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
-        if (_project.PlcConnections.Any(plc => plc.Id != _editingPlc?.Id && plc.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
+
+        if (_project.PlcConnections.Any(plc => plc.Id != _editingPlc?.Id &&
+                                               plc.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
         {
-            MessageBox.Show("Esiste già un PLC con questo nome.", "Configurazione PLC", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show("Esiste già un PLC con questo nome.",
+                "Configurazione PLC", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
         var plcDefinition = _editingPlc ?? new PlcConnectionDefinition();
+
         plcDefinition.Name = name;
-        plcDefinition.Driver = PlcDriverCombo.SelectedItem is PlcDriver driver ? driver : PlcDriver.SiemensS7;
+        plcDefinition.Driver = PlcDriverCombo.SelectedItem is PlcDriver driver
+            ? driver
+            : PlcDriver.SiemensS7;
+
         plcDefinition.Host = PlcHostBox.Text.Trim();
-        plcDefinition.Port = ParseInt(PlcPortBox.Text, plcDefinition.Driver == PlcDriver.SiemensS7 ? 102 : 0);
+        plcDefinition.Port = ParseInt(PlcPortBox.Text,
+            plcDefinition.Driver == PlcDriver.SiemensS7 ? 102 : 0);
+
         plcDefinition.CpuType = PlcCpuCombo.SelectedItem as string ?? "S71500";
         plcDefinition.Rack = (short)ParseInt(PlcRackBox.Text, 0);
         plcDefinition.Slot = (short)ParseInt(PlcSlotBox.Text, 1);
+
+        // Salvataggio configurazione OPC UA
+        plcDefinition.OpcUaServerUrl = PlcOpcUaUrlBox.Text.Trim();
+        plcDefinition.OpcUaUseAnonymous = PlcOpcUaAnonymousCheck.IsChecked == true;
+        plcDefinition.OpcUaUsername = PlcOpcUaUsernameBox.Text.Trim();
+        plcDefinition.OpcUaPassword = PlcOpcUaPasswordBox.Password;
+        plcDefinition.OpcUaAutoAcceptCertificates = PlcOpcUaAcceptCertCheck.IsChecked == true;
+
         if (_editingPlc is null)
         {
             _project.PlcConnections.Add(plcDefinition);
         }
+
         _editingPlc = plcDefinition;
         MarkDirty();
         RefreshCollections();
@@ -5811,6 +6086,13 @@ public partial class MainWindow : Window
         PlcCpuCombo.SelectedItem = plc.CpuType;
         PlcRackBox.Text = plc.Rack.ToString(CultureInfo.InvariantCulture);
         PlcSlotBox.Text = plc.Slot.ToString(CultureInfo.InvariantCulture);
+
+        PlcOpcUaUrlBox.Text = plc.OpcUaServerUrl;
+        PlcOpcUaAnonymousCheck.IsChecked = plc.OpcUaUseAnonymous;
+        PlcOpcUaUsernameBox.Text = plc.OpcUaUsername;
+        PlcOpcUaPasswordBox.Password = plc.OpcUaPassword;
+        PlcOpcUaAcceptCertCheck.IsChecked = plc.OpcUaAutoAcceptCertificates;
+
         UpdatePlcFieldVisibility(plc.Driver);
     }
 
@@ -5824,9 +6106,21 @@ public partial class MainWindow : Window
 
     private void UpdatePlcFieldVisibility(PlcDriver driver)
     {
-        PlcNetworkFields.Visibility = driver == PlcDriver.Simulator ? Visibility.Collapsed : Visibility.Visible;
-        PlcSiemensFields.Visibility = driver == PlcDriver.SiemensS7 ? Visibility.Visible : Visibility.Collapsed;
-        PlcSimulatorInfo.Visibility = driver == PlcDriver.Simulator ? Visibility.Visible : Visibility.Collapsed;
+        PlcNetworkFields.Visibility = driver == PlcDriver.Simulator || driver == PlcDriver.OpcUa
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+
+        PlcSiemensFields.Visibility = driver == PlcDriver.SiemensS7
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+        PlcOpcUaFields.Visibility = driver == PlcDriver.OpcUa
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+        PlcSimulatorInfo.Visibility = driver == PlcDriver.Simulator
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     private void TagTree_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
@@ -5964,6 +6258,8 @@ public partial class MainWindow : Window
         TagAccessCombo.SelectedItem = tag.Access;
         TagPollBox.Text = tag.PollIntervalMs.ToString(CultureInfo.InvariantCulture);
         TagDescriptionBox.Text = tag.Description;
+
+        UpdateTagBrowseButtonVisibility();
     }
 
     private void RefreshTagTree(string? selectedTagId = null, string? selectedFolderId = null)
@@ -7352,6 +7648,8 @@ internal sealed class LoginWindow : Window
             ? new LoginCredentials(dialog._username.Text.Trim(), dialog._password.Password)
             : null;
     }
+
+    
 }
 
 internal sealed record LoginCredentials(string Username, string Password);
