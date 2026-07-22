@@ -356,14 +356,18 @@
 
         <Grid Grid.Row="1" x:Name="MainWorkspace">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition x:Name="LeftSidebarColumn" Width="330" MinWidth="280" MaxWidth="560"/>
+                <!-- Colonna SINISTRA (ora contiene Pagine): usa le misure più piccole -->
+                <ColumnDefinition x:Name="LeftSidebarColumn" Width="248" MinWidth="210" MaxWidth="420"/>
+
                 <ColumnDefinition x:Name="LeftSidebarRailColumn" Width="28"/>
                 <ColumnDefinition Width="*" MinWidth="520"/>
                 <ColumnDefinition x:Name="RightSidebarRailColumn" Width="28"/>
-                <ColumnDefinition x:Name="RightSidebarColumn" Width="248" MinWidth="210" MaxWidth="420"/>
+
+                <!-- Colonna DESTRA (ora contiene Proprietà): usa le misure più grandi -->
+                <ColumnDefinition x:Name="RightSidebarColumn" Width="330" MinWidth="280" MaxWidth="560"/>
             </Grid.ColumnDefinitions>
 
-            <Border x:Name="DesignerSidebar" Grid.Column="4" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1,0,0,0">
+            <Border x:Name="DesignerSidebar" Grid.Column="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,1,0">
                 <Grid Margin="14">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
@@ -481,7 +485,7 @@
                         ToolTip="Nascondi pannello Pagine e oggetti" AutomationProperties.Name="Nascondi pannello Pagine e oggetti"/>
             </Grid>
 
-            <Border x:Name="InspectorSidebar" Grid.Column="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,1,0">
+            <Border x:Name="InspectorSidebar" Grid.Column="4" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1,0,0,0">
                 <TabControl x:Name="InspectorTabs" Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}" Padding="8">
                     <TabItem Header="PROPRIETÀ">
                         <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="8">

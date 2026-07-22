@@ -22,10 +22,12 @@ namespace HMI;
 public partial class MainWindow : Window
 {
     private const double SnapSize = 5;
-    private const double LeftSidebarMinimumWidth = 280;
-    private const double LeftSidebarMaximumWidth = 560;
-    private const double RightSidebarMinimumWidth = 210;
-    private const double RightSidebarMaximumWidth = 420;
+    private double _leftSidebarExpandedWidth = 248;
+    private const double LeftSidebarMinimumWidth = 210;
+    private const double LeftSidebarMaximumWidth = 420;
+    private double _rightSidebarExpandedWidth = 330;
+    private const double RightSidebarMinimumWidth = 280;
+    private const double RightSidebarMaximumWidth = 560;
     private const double WorkspaceMinimumWidth = 520;
     private const double SidebarRailWidth = 28;
     private static readonly string[] ChartSeriesPalette = ["#28C2B8", "#227CFF", "#F1B24A", "#EF5B5B", "#7C5CFC", "#12B981", "#EC4899", "#F8FAFC"];
@@ -87,8 +89,6 @@ public partial class MainWindow : Window
     private bool _pageFolderInspectorActive;
     private bool _dragging;
     private Point _dragStart;
-    private double _leftSidebarExpandedWidth = 330;
-    private double _rightSidebarExpandedWidth = 248;
     private bool _leftSidebarCollapsed;
     private bool _rightSidebarCollapsed;
     private string? _editingAnimationRuleId;
@@ -2285,25 +2285,27 @@ public partial class MainWindow : Window
             {
                 _leftSidebarExpandedWidth = Math.Clamp(LeftSidebarColumn.ActualWidth, LeftSidebarMinimumWidth, LeftSidebarMaximumWidth);
             }
-            InspectorSidebar.Visibility = Visibility.Collapsed;
+            DesignerSidebar.Visibility = Visibility.Collapsed;
             LeftSidebarColumn.MinWidth = 0;
             LeftSidebarColumn.MaxWidth = 0;
             LeftSidebarColumn.Width = new GridLength(0);
             LeftSidebarSplitter.IsEnabled = false;
             ToggleLeftSidebarButton.Content = "›";
-            ToggleLeftSidebarButton.ToolTip = "Mostra pannello Proprietà";
-            AutomationProperties.SetName(ToggleLeftSidebarButton, "Mostra pannello Proprietà");
+            // Testi aggiornati per il lato sinistro
+            ToggleLeftSidebarButton.ToolTip = "Mostra pannello Pagine e oggetti";
+            AutomationProperties.SetName(ToggleLeftSidebarButton, "Mostra pannello Pagine e oggetti");
         }
         else
         {
             LeftSidebarColumn.MaxWidth = LeftSidebarMaximumWidth;
             LeftSidebarColumn.MinWidth = LeftSidebarMinimumWidth;
             LeftSidebarColumn.Width = new GridLength(Math.Clamp(_leftSidebarExpandedWidth, LeftSidebarMinimumWidth, LeftSidebarMaximumWidth));
-            InspectorSidebar.Visibility = Visibility.Visible;
+            DesignerSidebar.Visibility = Visibility.Visible;
             LeftSidebarSplitter.IsEnabled = true;
             ToggleLeftSidebarButton.Content = "‹";
-            ToggleLeftSidebarButton.ToolTip = "Nascondi pannello Proprietà";
-            AutomationProperties.SetName(ToggleLeftSidebarButton, "Nascondi pannello Proprietà");
+            // Testi aggiornati per il lato sinistro
+            ToggleLeftSidebarButton.ToolTip = "Nascondi pannello Pagine e oggetti";
+            AutomationProperties.SetName(ToggleLeftSidebarButton, "Nascondi pannello Pagine e oggetti");
         }
         ConstrainSidebarWidths();
         if (focusToggle)
@@ -2320,25 +2322,27 @@ public partial class MainWindow : Window
             {
                 _rightSidebarExpandedWidth = Math.Clamp(RightSidebarColumn.ActualWidth, RightSidebarMinimumWidth, RightSidebarMaximumWidth);
             }
-            DesignerSidebar.Visibility = Visibility.Collapsed;
+            InspectorSidebar.Visibility = Visibility.Collapsed;
             RightSidebarColumn.MinWidth = 0;
             RightSidebarColumn.MaxWidth = 0;
             RightSidebarColumn.Width = new GridLength(0);
             RightSidebarSplitter.IsEnabled = false;
             ToggleRightSidebarButton.Content = "‹";
-            ToggleRightSidebarButton.ToolTip = "Mostra pannello Pagine e oggetti";
-            AutomationProperties.SetName(ToggleRightSidebarButton, "Mostra pannello Pagine e oggetti");
+            // Testi aggiornati per il lato destro
+            ToggleRightSidebarButton.ToolTip = "Mostra pannello Proprietà";
+            AutomationProperties.SetName(ToggleRightSidebarButton, "Mostra pannello Proprietà");
         }
         else
         {
             RightSidebarColumn.MaxWidth = RightSidebarMaximumWidth;
             RightSidebarColumn.MinWidth = RightSidebarMinimumWidth;
             RightSidebarColumn.Width = new GridLength(Math.Clamp(_rightSidebarExpandedWidth, RightSidebarMinimumWidth, RightSidebarMaximumWidth));
-            DesignerSidebar.Visibility = Visibility.Visible;
+            InspectorSidebar.Visibility = Visibility.Visible;
             RightSidebarSplitter.IsEnabled = true;
             ToggleRightSidebarButton.Content = "›";
-            ToggleRightSidebarButton.ToolTip = "Nascondi pannello Pagine e oggetti";
-            AutomationProperties.SetName(ToggleRightSidebarButton, "Nascondi pannello Pagine e oggetti");
+            // Testi aggiornati per il lato destro
+            ToggleRightSidebarButton.ToolTip = "Nascondi pannello Proprietà";
+            AutomationProperties.SetName(ToggleRightSidebarButton, "Nascondi pannello Proprietà");
         }
         ConstrainSidebarWidths();
         if (focusToggle)
