@@ -4,7 +4,7 @@ namespace HMI.Models;
 
 public sealed class HmiProject
 {
-    public int SchemaVersion { get; set; } = 4;
+    public int SchemaVersion { get; set; } = 5;
     public string Name { get; set; } = "Nuovo progetto";
     public double CanvasWidth { get; set; } = 1280;
     public double CanvasHeight { get; set; } = 720;
@@ -24,7 +24,8 @@ public sealed class HmiProject
 
     public void Normalize()
     {
-        SchemaVersion = Math.Max(SchemaVersion, 4);
+        var sourceSchemaVersion = SchemaVersion;
+        SchemaVersion = Math.Max(SchemaVersion, 5);
         PageFolders ??= [];
         Pages ??= [];
         PlcConnections ??= [];
@@ -131,10 +132,67 @@ public sealed class HmiProject
             foreach (var widget in page.Widgets)
             {
                 widget.Animation ??= new HmiAnimationDefinition();
+                widget.Animation.Rules ??= [];
+                if (sourceSchemaVersion < 5)
+                {
+                    widget.Animation.DefaultBackground = string.IsNullOrWhiteSpace(widget.Animation.InactiveBackground)
+                        ? widget.Background
+                        : widget.Animation.InactiveBackground;
+                    widget.Animation.DefaultForeground = string.IsNullOrWhiteSpace(widget.Animation.InactiveForeground)
+                        ? widget.Foreground
+                        : widget.Animation.InactiveForeground;
+                    if (widget.Type is HmiWidgetType.Button or HmiWidgetType.ValueDisplay or HmiWidgetType.NumericInput or HmiWidgetType.Indicator &&
+                        widget.Animation.Rules.Count == 0)
+                    {
+                        widget.Animation.Rules.Add(new HmiAnimationRuleDefinition
+                        {
+                            Condition = widget.Animation.Condition switch
+                            {
+                                AlarmCondition.True => HmiDynamicCondition.True,
+                                AlarmCondition.False => HmiDynamicCondition.False,
+                                AlarmCondition.Equals => HmiDynamicCondition.Equals,
+                                AlarmCondition.NotEquals => HmiDynamicCondition.NotEquals,
+                                AlarmCondition.GreaterThan => HmiDynamicCondition.GreaterThan,
+                                AlarmCondition.LessThan => HmiDynamicCondition.LessThan,
+                                _ => HmiDynamicCondition.Equals
+                            },
+                            CompareValue = widget.Animation.CompareValue,
+                            Background = widget.Animation.ActiveBackground,
+                            Foreground = widget.Animation.ActiveForeground
+                        });
+                    }
+                }
+                widget.Animation.DefaultBackground = string.IsNullOrWhiteSpace(widget.Animation.DefaultBackground)
+                    ? widget.Type == HmiWidgetType.Indicator ? "#526273" : widget.Background
+                    : widget.Animation.DefaultBackground.Trim();
+                widget.Animation.DefaultForeground = string.IsNullOrWhiteSpace(widget.Animation.DefaultForeground)
+                    ? widget.Foreground
+                    : widget.Animation.DefaultForeground.Trim();
+                var animationRuleIds = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var rule in widget.Animation.Rules)
+                {
+                    if (string.IsNullOrWhiteSpace(rule.Id) || !animationRuleIds.Add(rule.Id))
+                    {
+                        rule.Id = Guid.NewGuid().ToString("N");
+                        animationRuleIds.Add(rule.Id);
+                    }
+                    rule.Name = string.IsNullOrWhiteSpace(rule.Name) ? "Stato" : rule.Name.Trim();
+                    rule.CompareValue = rule.CompareValue?.Trim() ?? string.Empty;
+                    rule.CompareValue2 = rule.CompareValue2?.Trim() ?? string.Empty;
+                    rule.Background = string.IsNullOrWhiteSpace(rule.Background)
+                        ? widget.Animation.DefaultBackground
+                        : rule.Background.Trim();
+                    rule.Foreground = string.IsNullOrWhiteSpace(rule.Foreground)
+                        ? widget.Animation.DefaultForeground
+                        : rule.Foreground.Trim();
+                }
                 widget.ChartSeries ??= [];
                 if (widget.Type == HmiWidgetType.Indicator)
                 {
-                    widget.Animation.Enabled = true;
+                    if (sourceSchemaVersion < 5)
+                    {
+                        widget.Animation.Enabled = true;
+                    }
                     if (string.IsNullOrWhiteSpace(widget.Animation.TagId))
                     {
                         widget.Animation.TagId = widget.TagId;
@@ -295,6 +353,19 @@ public sealed class HmiProject
                 {
                     Enabled = true,
                     TagId = runningTag.Id,
+                    DefaultBackground = "#526273",
+                    DefaultForeground = "#8FA0B3",
+                    Rules =
+                    [
+                        new HmiAnimationRuleDefinition
+                        {
+                            Name = "Marcia",
+                            Condition = HmiDynamicCondition.True,
+                            CompareValue = "true",
+                            Background = "#22C78A",
+                            Foreground = "#F8FAFC"
+                        }
+                    ],
                     Condition = AlarmCondition.True,
                     ActiveBackground = "#22C78A",
                     InactiveBackground = "#526273"
@@ -646,6 +717,11 @@ public sealed class HmiAnimationDefinition
 {
     public bool Enabled { get; set; }
     public string TagId { get; set; } = string.Empty;
+    public string DefaultBackground { get; set; } = string.Empty;
+    public string DefaultForeground { get; set; } = string.Empty;
+    public List<HmiAnimationRuleDefinition> Rules { get; set; } = [];
+
+    // Campi mantenuti per migrare automaticamente i progetti fino al formato v4.
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public AlarmCondition Condition { get; set; } = AlarmCondition.True;
     public string CompareValue { get; set; } = "true";
@@ -653,6 +729,19 @@ public sealed class HmiAnimationDefinition
     public string InactiveBackground { get; set; } = "#253244";
     public string ActiveForeground { get; set; } = "#F8FAFC";
     public string InactiveForeground { get; set; } = "#8FA0B3";
+}
+
+public sealed class HmiAnimationRuleDefinition
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Name { get; set; } = "Stato";
+    public bool Enabled { get; set; } = true;
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public HmiDynamicCondition Condition { get; set; } = HmiDynamicCondition.Equals;
+    public string CompareValue { get; set; } = "0";
+    public string CompareValue2 { get; set; } = string.Empty;
+    public string Background { get; set; } = "#12B981";
+    public string Foreground { get; set; } = "#F8FAFC";
 }
 
 public sealed class RedundancySettings
@@ -798,6 +887,22 @@ public enum AlarmCondition
     NotEquals,
     GreaterThan,
     LessThan
+}
+
+public enum HmiDynamicCondition
+{
+    True,
+    False,
+    Equals,
+    NotEquals,
+    GreaterThan,
+    GreaterThanOrEqual,
+    LessThan,
+    LessThanOrEqual,
+    BetweenInclusive,
+    BitSet,
+    BitClear,
+    BitMaskEquals
 }
 
 public enum AlarmSeverity

@@ -12,7 +12,9 @@ HMI Studio è un editor desktop WPF che separa la progettazione grafica dal runt
 - selezione multipla con `Ctrl+clic`, spostamento di gruppo e comandi per allineare gli oggetti tra loro o centrarli nella pagina;
 - modifica di posizione, dimensioni, colori, testo, allineamento del testo e associazioni dal pannello proprietà;
 - spia circolare compatta con colore dinamico per stato tag;
-- animazioni del colore di sfondo e del testo in base al valore di una tag;
+- animazioni in stile Unified con stati ordinati per priorità, condizioni booleane, confronti, intervalli e bit, colori per stato e fallback predefinito;
+- pannello Proprietà a sinistra e pannello Pagine/Oggetti a destra, entrambi richiudibili e ridimensionabili trascinando il divisore;
+- proprietà degli oggetti raccolte in sezioni funzionali espandibili e richiudibili;
 - configurazione di più PLC Siemens S7, Codesys o simulati, con campi coerenti con il driver scelto;
 - creazione di tag con indirizzo, tipo, accesso e intervallo di lettura;
 - organizzazione di tag e allarmi in cartelle e sottocartelle;
@@ -35,12 +37,16 @@ HMI Studio è un editor desktop WPF che separa la progettazione grafica dal runt
 
 1. Nella scheda **PLC**, aggiungere il controllore e scegliere il driver. I parametri mostrati cambiano in base al collegamento selezionato.
 2. Nella scheda **TAG**, creare cartelle e variabili e collegarle al PLC.
-3. Aggiungere cartelle, pagine e oggetti grafici dalla barra sinistra.
+3. Aggiungere cartelle, pagine e oggetti grafici dalla barra destra; usare la barra sinistra per modificarne le proprietà.
 4. Creare una pagina di tipo **Template** per la navigazione e assegnarla alle pagine standard che devono usarla.
 5. Inserire nella pagina iniziale o nel template un oggetto **Esci runtime**. Senza questo oggetto il runtime non viene avviato dall'editor.
 6. Salvare il progetto e premere **RUNTIME**.
 
 Il runtime non genera automaticamente un menu di pagina: tutta la navigazione è quella progettata tramite pulsanti di navigazione, template e pulsanti popup.
+
+## Dinamiche grafiche
+
+Per pulsanti, visualizzatori, campi numerici e spie è possibile abilitare una dinamica collegata a una tag leggibile. Gli stati vengono valutati dall'alto verso il basso e prevale la prima regola vera, come in una tabella di dinamizzazione: si possono usare condizioni vero/falso, uguaglianza, soglie, intervalli inclusivi, singoli bit e maschere. Le condizioni disponibili cambiano in base al tipo della tag. Se nessuna regola è vera viene applicato lo stato predefinito; ogni stato e il fallback dispongono di palette e codice colore manuale.
 
 ## Utenti e livelli di accesso
 

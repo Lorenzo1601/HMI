@@ -2,7 +2,9 @@ using System.ComponentModel;
 using System.Data;
 using System.Globalization;
 using System.IO;
+using System.Text.Json;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -20,7 +22,28 @@ namespace HMI;
 public partial class MainWindow : Window
 {
     private const double SnapSize = 5;
+    private const double LeftSidebarMinimumWidth = 280;
+    private const double LeftSidebarMaximumWidth = 560;
+    private const double RightSidebarMinimumWidth = 210;
+    private const double RightSidebarMaximumWidth = 420;
+    private const double WorkspaceMinimumWidth = 520;
+    private const double SidebarRailWidth = 28;
     private static readonly string[] ChartSeriesPalette = ["#28C2B8", "#227CFF", "#F1B24A", "#EF5B5B", "#7C5CFC", "#12B981", "#EC4899", "#F8FAFC"];
+    private static readonly AnimationConditionOption[] AnimationConditionOptions =
+    [
+        new(HmiDynamicCondition.True, "Vero"),
+        new(HmiDynamicCondition.False, "Falso"),
+        new(HmiDynamicCondition.Equals, "Uguale a"),
+        new(HmiDynamicCondition.NotEquals, "Diverso da"),
+        new(HmiDynamicCondition.GreaterThan, "Maggiore di"),
+        new(HmiDynamicCondition.GreaterThanOrEqual, "Maggiore o uguale"),
+        new(HmiDynamicCondition.LessThan, "Minore di"),
+        new(HmiDynamicCondition.LessThanOrEqual, "Minore o uguale"),
+        new(HmiDynamicCondition.BetweenInclusive, "Intervallo incluso"),
+        new(HmiDynamicCondition.BitSet, "Bit impostato"),
+        new(HmiDynamicCondition.BitClear, "Bit non impostato"),
+        new(HmiDynamicCondition.BitMaskEquals, "Maschera bit uguale")
+    ];
     private readonly ProjectStorageService _storage = new();
     private readonly RuntimeExportService _runtimeExporter = new();
     private readonly HmiRuntimeSession _runtime = new();
@@ -64,6 +87,11 @@ public partial class MainWindow : Window
     private bool _pageFolderInspectorActive;
     private bool _dragging;
     private Point _dragStart;
+    private double _leftSidebarExpandedWidth = 330;
+    private double _rightSidebarExpandedWidth = 248;
+    private bool _leftSidebarCollapsed;
+    private bool _rightSidebarCollapsed;
+    private string? _editingAnimationRuleId;
 
     public MainWindow()
     {
@@ -73,7 +101,7 @@ public partial class MainWindow : Window
         TagAccessCombo.ItemsSource = Enum.GetValues<TagAccess>();
         PageTypeCombo.ItemsSource = Enum.GetValues<HmiPageType>();
         WidgetImageStretchCombo.ItemsSource = new[] { "Uniform", "UniformToFill", "Fill", "None" };
-        WidgetAnimationConditionCombo.ItemsSource = Enum.GetValues<AlarmCondition>();
+        WidgetAnimationRuleConditionCombo.ItemsSource = AnimationConditionOptions;
         AlarmConditionCombo.ItemsSource = Enum.GetValues<AlarmCondition>();
         AlarmSeverityCombo.ItemsSource = Enum.GetValues<AlarmSeverity>();
         DatabaseLoggingModeCombo.ItemsSource = Enum.GetValues<DatabaseLoggingMode>();
@@ -84,7 +112,7 @@ public partial class MainWindow : Window
         PreviewKeyDown += MainWindow_PreviewKeyDown;
         PreviewMouseDown += (_, _) => RecordRuntimeUserActivity();
         _userSessionTimer.Tick += UserSessionTimer_Tick;
-        SizeChanged += (_, _) => UpdateRuntimeViewport();
+        SizeChanged += MainWindow_SizeChanged;
         LoadProjectIntoEditor();
     }
 
@@ -127,6 +155,8 @@ public partial class MainWindow : Window
         _currentUser = null;
         _currentUserAuditSessionId = null;
         _pageFolderInspectorActive = false;
+        _editingAnimationRuleId = null;
+        _editingChartSeriesId = null;
         RefreshCollections();
         if (_editingUser is null)
         {
@@ -185,7 +215,7 @@ public partial class MainWindow : Window
         WidgetImageCombo.ItemsSource = null;
         WidgetImageCombo.ItemsSource = _project.Assets;
         WidgetAnimationTagCombo.ItemsSource = null;
-        WidgetAnimationTagCombo.ItemsSource = _project.Tags;
+        WidgetAnimationTagCombo.ItemsSource = _project.Tags.Where(tag => tag.Access != TagAccess.Write).ToList();
         WidgetChartSeriesTagCombo.ItemsSource = null;
         WidgetChartSeriesTagCombo.ItemsSource = _project.Tags.Where(IsChartCompatibleTag).ToList();
         TagPlcCombo.ItemsSource = null;
@@ -325,8 +355,9 @@ public partial class MainWindow : Window
 
     private FrameworkElement CreateWidgetVisual(HmiWidgetDefinition widget, bool interactive)
     {
-        var foreground = BrushOf(widget.Foreground, "#F8FAFC");
-        var background = BrushOf(widget.Background, "#253244");
+        var previewDynamicAppearance = !interactive && widget.Animation.Enabled && SupportsDynamicAppearance(widget.Type);
+        var foreground = BrushOf(previewDynamicAppearance ? widget.Animation.DefaultForeground : widget.Foreground, "#F8FAFC");
+        var background = BrushOf(previewDynamicAppearance ? widget.Animation.DefaultBackground : widget.Background, "#253244");
         var textAlignment = ResolveTextAlignment(widget);
 
         if (widget.Type == HmiWidgetType.Image)
@@ -498,7 +529,7 @@ public partial class MainWindow : Window
             {
                 Width = 100,
                 Height = 100,
-                Fill = BrushOf(widget.Animation.InactiveBackground, "#526273"),
+                Fill = BrushOf(widget.Animation.DefaultBackground, "#526273"),
                 Stroke = BrushOf("#718196"),
                 StrokeThickness = 3
             };
@@ -2209,6 +2240,195 @@ public partial class MainWindow : Window
         }
     }
 
+    private void ToggleLeftSidebar_Click(object sender, RoutedEventArgs e)
+    {
+        if (_runtimeMode)
+        {
+            return;
+        }
+        _leftSidebarCollapsed = !_leftSidebarCollapsed;
+        ApplyLeftSidebarLayout();
+    }
+
+    private void ToggleRightSidebar_Click(object sender, RoutedEventArgs e)
+    {
+        if (_runtimeMode)
+        {
+            return;
+        }
+        _rightSidebarCollapsed = !_rightSidebarCollapsed;
+        ApplyRightSidebarLayout();
+    }
+
+    private void SidebarSplitter_DragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        if (_runtimeMode)
+        {
+            return;
+        }
+        if (sender == LeftSidebarSplitter && !_leftSidebarCollapsed && LeftSidebarColumn.ActualWidth > 0)
+        {
+            _leftSidebarExpandedWidth = Math.Clamp(LeftSidebarColumn.ActualWidth, LeftSidebarMinimumWidth, LeftSidebarMaximumWidth);
+        }
+        else if (sender == RightSidebarSplitter && !_rightSidebarCollapsed && RightSidebarColumn.ActualWidth > 0)
+        {
+            _rightSidebarExpandedWidth = Math.Clamp(RightSidebarColumn.ActualWidth, RightSidebarMinimumWidth, RightSidebarMaximumWidth);
+        }
+        ConstrainSidebarWidths();
+    }
+
+    private void ApplyLeftSidebarLayout(bool focusToggle = true)
+    {
+        if (_leftSidebarCollapsed)
+        {
+            if (LeftSidebarColumn.ActualWidth >= LeftSidebarMinimumWidth)
+            {
+                _leftSidebarExpandedWidth = Math.Clamp(LeftSidebarColumn.ActualWidth, LeftSidebarMinimumWidth, LeftSidebarMaximumWidth);
+            }
+            InspectorSidebar.Visibility = Visibility.Collapsed;
+            LeftSidebarColumn.MinWidth = 0;
+            LeftSidebarColumn.MaxWidth = 0;
+            LeftSidebarColumn.Width = new GridLength(0);
+            LeftSidebarSplitter.IsEnabled = false;
+            ToggleLeftSidebarButton.Content = "›";
+            ToggleLeftSidebarButton.ToolTip = "Mostra pannello Proprietà";
+            AutomationProperties.SetName(ToggleLeftSidebarButton, "Mostra pannello Proprietà");
+        }
+        else
+        {
+            LeftSidebarColumn.MaxWidth = LeftSidebarMaximumWidth;
+            LeftSidebarColumn.MinWidth = LeftSidebarMinimumWidth;
+            LeftSidebarColumn.Width = new GridLength(Math.Clamp(_leftSidebarExpandedWidth, LeftSidebarMinimumWidth, LeftSidebarMaximumWidth));
+            InspectorSidebar.Visibility = Visibility.Visible;
+            LeftSidebarSplitter.IsEnabled = true;
+            ToggleLeftSidebarButton.Content = "‹";
+            ToggleLeftSidebarButton.ToolTip = "Nascondi pannello Proprietà";
+            AutomationProperties.SetName(ToggleLeftSidebarButton, "Nascondi pannello Proprietà");
+        }
+        ConstrainSidebarWidths();
+        if (focusToggle)
+        {
+            ToggleLeftSidebarButton.Focus();
+        }
+    }
+
+    private void ApplyRightSidebarLayout(bool focusToggle = true)
+    {
+        if (_rightSidebarCollapsed)
+        {
+            if (RightSidebarColumn.ActualWidth >= RightSidebarMinimumWidth)
+            {
+                _rightSidebarExpandedWidth = Math.Clamp(RightSidebarColumn.ActualWidth, RightSidebarMinimumWidth, RightSidebarMaximumWidth);
+            }
+            DesignerSidebar.Visibility = Visibility.Collapsed;
+            RightSidebarColumn.MinWidth = 0;
+            RightSidebarColumn.MaxWidth = 0;
+            RightSidebarColumn.Width = new GridLength(0);
+            RightSidebarSplitter.IsEnabled = false;
+            ToggleRightSidebarButton.Content = "‹";
+            ToggleRightSidebarButton.ToolTip = "Mostra pannello Pagine e oggetti";
+            AutomationProperties.SetName(ToggleRightSidebarButton, "Mostra pannello Pagine e oggetti");
+        }
+        else
+        {
+            RightSidebarColumn.MaxWidth = RightSidebarMaximumWidth;
+            RightSidebarColumn.MinWidth = RightSidebarMinimumWidth;
+            RightSidebarColumn.Width = new GridLength(Math.Clamp(_rightSidebarExpandedWidth, RightSidebarMinimumWidth, RightSidebarMaximumWidth));
+            DesignerSidebar.Visibility = Visibility.Visible;
+            RightSidebarSplitter.IsEnabled = true;
+            ToggleRightSidebarButton.Content = "›";
+            ToggleRightSidebarButton.ToolTip = "Nascondi pannello Pagine e oggetti";
+            AutomationProperties.SetName(ToggleRightSidebarButton, "Nascondi pannello Pagine e oggetti");
+        }
+        ConstrainSidebarWidths();
+        if (focusToggle)
+        {
+            ToggleRightSidebarButton.Focus();
+        }
+    }
+
+    private void MainWindow_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        UpdateRuntimeViewport();
+        ConstrainSidebarWidths();
+    }
+
+    private void ConstrainSidebarWidths()
+    {
+        if (_runtimeMode || MainWorkspace.ActualWidth <= 0 || LeftSidebarRail.Visibility != Visibility.Visible ||
+            RightSidebarRail.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        var leftWidth = _leftSidebarCollapsed
+            ? 0
+            : Math.Clamp(_leftSidebarExpandedWidth, LeftSidebarMinimumWidth, LeftSidebarMaximumWidth);
+        var rightWidth = _rightSidebarCollapsed
+            ? 0
+            : Math.Clamp(_rightSidebarExpandedWidth, RightSidebarMinimumWidth, RightSidebarMaximumWidth);
+        var availableWidth = Math.Max(0, MainWorkspace.ActualWidth - (SidebarRailWidth * 2) - WorkspaceMinimumWidth);
+        var overflow = leftWidth + rightWidth - availableWidth;
+        if (overflow > 0)
+        {
+            var leftMinimum = _leftSidebarCollapsed ? 0 : LeftSidebarMinimumWidth;
+            var rightMinimum = _rightSidebarCollapsed ? 0 : RightSidebarMinimumWidth;
+            var leftSurplus = Math.Max(0, leftWidth - leftMinimum);
+            var rightSurplus = Math.Max(0, rightWidth - rightMinimum);
+            var totalSurplus = leftSurplus + rightSurplus;
+            if (totalSurplus > 0)
+            {
+                var leftReduction = Math.Min(leftSurplus, overflow * leftSurplus / totalSurplus);
+                leftWidth -= leftReduction;
+                overflow -= leftReduction;
+                rightWidth -= Math.Min(rightSurplus, overflow);
+            }
+        }
+
+        if (!_leftSidebarCollapsed)
+        {
+            LeftSidebarColumn.Width = new GridLength(Math.Max(LeftSidebarMinimumWidth, leftWidth));
+        }
+        if (!_rightSidebarCollapsed)
+        {
+            RightSidebarColumn.Width = new GridLength(Math.Max(RightSidebarMinimumWidth, rightWidth));
+        }
+    }
+
+    private void HideEditorSidebarsForRuntime()
+    {
+        if (!_leftSidebarCollapsed && LeftSidebarColumn.ActualWidth >= LeftSidebarMinimumWidth)
+        {
+            _leftSidebarExpandedWidth = Math.Clamp(LeftSidebarColumn.ActualWidth, LeftSidebarMinimumWidth, LeftSidebarMaximumWidth);
+        }
+        if (!_rightSidebarCollapsed && RightSidebarColumn.ActualWidth >= RightSidebarMinimumWidth)
+        {
+            _rightSidebarExpandedWidth = Math.Clamp(RightSidebarColumn.ActualWidth, RightSidebarMinimumWidth, RightSidebarMaximumWidth);
+        }
+        DesignerSidebar.Visibility = Visibility.Collapsed;
+        InspectorSidebar.Visibility = Visibility.Collapsed;
+        LeftSidebarRail.Visibility = Visibility.Collapsed;
+        RightSidebarRail.Visibility = Visibility.Collapsed;
+        LeftSidebarColumn.MinWidth = 0;
+        LeftSidebarColumn.MaxWidth = 0;
+        LeftSidebarColumn.Width = new GridLength(0);
+        RightSidebarColumn.MinWidth = 0;
+        RightSidebarColumn.MaxWidth = 0;
+        RightSidebarColumn.Width = new GridLength(0);
+        LeftSidebarRailColumn.Width = new GridLength(0);
+        RightSidebarRailColumn.Width = new GridLength(0);
+    }
+
+    private void RestoreEditorSidebarsAfterRuntime()
+    {
+        LeftSidebarRailColumn.Width = new GridLength(28);
+        RightSidebarRailColumn.Width = new GridLength(28);
+        LeftSidebarRail.Visibility = Visibility.Visible;
+        RightSidebarRail.Visibility = Visibility.Visible;
+        ApplyLeftSidebarLayout(focusToggle: false);
+        ApplyRightSidebarLayout(focusToggle: false);
+    }
+
     private void DesignerItem_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (sender is not Grid root || root.Tag is not HmiWidgetDefinition widget)
@@ -2216,6 +2436,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        CommitAnimationRuleEditor();
         if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
         {
             if (!_selectedWidgetIds.Add(widget.Id))
@@ -2475,6 +2696,7 @@ public partial class MainWindow : Window
             var selectedCount = _selectedWidgetIds.Count;
             var isIndicator = widget.Type == HmiWidgetType.Indicator;
             var isNumericField = widget.Type is HmiWidgetType.ValueDisplay or HmiWidgetType.NumericInput;
+            var supportsDynamics = SupportsDynamicAppearance(widget.Type);
             WidgetTypeText.Text = WidgetTypeLabel(widget.Type).ToUpperInvariant() + (selectedCount > 1 ? $" · RIFERIMENTO ({selectedCount} SELEZIONATI)" : string.Empty);
             WidgetTargetPageCombo.ItemsSource = widget.Type == HmiWidgetType.PopupButton
                 ? _project.Pages.Where(page => page.Type == HmiPageType.Popup).ToList()
@@ -2491,21 +2713,25 @@ public partial class MainWindow : Window
                 ? Visibility.Visible : Visibility.Collapsed;
             WidgetChartPropertyGroup.Visibility = widget.Type == HmiWidgetType.TrendChart ? Visibility.Visible : Visibility.Collapsed;
             WidgetAlarmHistoryPropertyGroup.Visibility = widget.Type == HmiWidgetType.AlarmHistoryViewer ? Visibility.Visible : Visibility.Collapsed;
-            WidgetAnimationPropertyGroup.Visibility = widget.Type is HmiWidgetType.Button or HmiWidgetType.ValueDisplay or HmiWidgetType.NumericInput or HmiWidgetType.Indicator
-                ? Visibility.Visible : Visibility.Collapsed;
+            WidgetAnimationPropertyGroup.Visibility = supportsDynamics ? Visibility.Visible : Visibility.Collapsed;
             WidgetNumericAppearancePropertyGroup.Visibility = isNumericField ? Visibility.Visible : Visibility.Collapsed;
-            WidgetTextPropertyGroup.Visibility = isIndicator ? Visibility.Collapsed : Visibility.Visible;
+            WidgetTextPropertyGroup.Visibility = widget.Type is HmiWidgetType.Indicator or HmiWidgetType.Image ? Visibility.Collapsed : Visibility.Visible;
             WidgetFontSizePropertyGroup.Visibility = widget.Type is HmiWidgetType.Indicator or HmiWidgetType.Image ? Visibility.Collapsed : Visibility.Visible;
             WidgetTextAlignmentPropertyGroup.Visibility = SupportsTextAlignment(widget.Type) ? Visibility.Visible : Visibility.Collapsed;
             WidgetBackgroundPropertyGroup.Visibility = isIndicator ? Visibility.Collapsed : Visibility.Visible;
-            WidgetForegroundPropertyGroup.Visibility = isIndicator ? Visibility.Collapsed : Visibility.Visible;
-            WidgetAnimationForegroundGroup.Visibility = isIndicator ? Visibility.Collapsed : Visibility.Visible;
-            WidgetAnimationEnabledCheck.Visibility = isIndicator ? Visibility.Collapsed : Visibility.Visible;
-            WidgetAnimationTitleText.Text = isIndicator ? "COLORI DINAMICI DELLA SPIA" : "ANIMAZIONE DINAMICA";
-            WidgetAnimationEnabledCheck.Content = isIndicator ? "Abilita colore dinamico da tag" : "Abilita cambio colore da tag";
-            WidgetAnimationTagLabel.Text = isIndicator ? "Tag stato" : "Tag animazione";
-            WidgetActiveBackgroundLabel.Text = isIndicator ? "Colore attivo" : "Sfondo attivo";
-            WidgetInactiveBackgroundLabel.Text = isIndicator ? "Colore inattivo" : "Sfondo inattivo";
+            WidgetForegroundPropertyGroup.Visibility = widget.Type is HmiWidgetType.Indicator or HmiWidgetType.Image ? Visibility.Collapsed : Visibility.Visible;
+            WidgetConnectionsSection.Visibility = AnyVisible(WidgetTagPropertyGroup, WidgetPagePropertyGroup, WidgetRecipePropertyGroup, WidgetImagePropertyGroup);
+            WidgetAppearanceSection.Visibility = AnyVisible(WidgetFontSizePropertyGroup, WidgetTextAlignmentPropertyGroup, WidgetBackgroundPropertyGroup, WidgetForegroundPropertyGroup);
+            WidgetValuesSection.Visibility = WidgetValuePropertyGroup.Visibility;
+            WidgetDataSection.Visibility = AnyVisible(WidgetHistoryPropertyGroup, WidgetChartPropertyGroup, WidgetAlarmHistoryPropertyGroup);
+            WidgetDynamicsSection.Visibility = WidgetAnimationPropertyGroup.Visibility;
+            WidgetAnimationRuleForegroundGroup.Visibility = isIndicator ? Visibility.Collapsed : Visibility.Visible;
+            WidgetAnimationDefaultForegroundGroup.Visibility = isIndicator ? Visibility.Collapsed : Visibility.Visible;
+            WidgetAnimationTitleText.Text = isIndicator ? "STATI DINAMICI DELLA SPIA" : "STATI DINAMICI A REGOLE";
+            WidgetAnimationEnabledCheck.Content = isIndicator ? "Abilita dinamizzazione della spia" : "Abilita dinamizzazione da tag";
+            WidgetAnimationTagLabel.Text = isIndicator ? "Tag stato" : "Tag sorgente";
+            WidgetAnimationRuleBackgroundLabel.Text = isIndicator ? "COLORE DELLA SPIA" : "COLORE SFONDO";
+            WidgetAnimationDefaultBackgroundLabel.Text = isIndicator ? "Colore spia predefinito" : "Colore sfondo predefinito";
             WidgetNameBox.Text = widget.Name;
             WidgetRequiredAccessLevelBox.Text = widget.RequiredAccessLevel.ToString(CultureInfo.InvariantCulture);
             WidgetRequiredAccessLevelBox.IsEnabled = widget.Type is not (HmiWidgetType.LoginButton or HmiWidgetType.LogoutButton);
@@ -2534,14 +2760,12 @@ public partial class MainWindow : Window
             WidgetChartSourceCombo.SelectedItem = widget.ChartSource;
             RefreshChartSeriesEditor(widget, _editingChartSeriesId);
             WidgetAlarmHistoryRetentionBox.Text = widget.AlarmHistoryRetentionDays.ToString(CultureInfo.InvariantCulture);
-            WidgetAnimationEnabledCheck.IsChecked = isIndicator || widget.Animation.Enabled;
+            WidgetAnimationEnabledCheck.IsChecked = widget.Animation.Enabled;
             WidgetAnimationTagCombo.SelectedValue = widget.Animation.TagId;
-            WidgetAnimationConditionCombo.SelectedItem = widget.Animation.Condition;
-            WidgetAnimationValueBox.Text = widget.Animation.CompareValue;
-            WidgetActiveBackgroundBox.Text = widget.Animation.ActiveBackground;
-            WidgetInactiveBackgroundBox.Text = widget.Animation.InactiveBackground;
-            WidgetActiveForegroundBox.Text = widget.Animation.ActiveForeground;
-            WidgetInactiveForegroundBox.Text = widget.Animation.InactiveForeground;
+            WidgetAnimationDefaultBackgroundBox.Text = widget.Animation.DefaultBackground;
+            WidgetAnimationDefaultForegroundBox.Text = widget.Animation.DefaultForeground;
+            RefreshAnimationRuleEditor(widget, _editingAnimationRuleId);
+            UpdateAnimationValidation(widget);
             UpdateTextAlignmentButtons(widget.TextAlignment);
         }
         _updatingInspector = false;
@@ -2567,6 +2791,8 @@ public partial class MainWindow : Window
         }
 
         var widget = _selectedWidget;
+        var originalWidgetState = JsonSerializer.Serialize(widget);
+        CommitAnimationRuleEditor();
         widget.Name = WidgetNameBox.Text.Trim();
         widget.RequiredAccessLevel = Math.Clamp(ParseInt(WidgetRequiredAccessLevelBox.Text, widget.RequiredAccessLevel), 0, _project.Security.MaximumAccessLevel);
         if (widget.Type is HmiWidgetType.LoginButton or HmiWidgetType.LogoutButton)
@@ -2607,19 +2833,25 @@ public partial class MainWindow : Window
         widget.HistoryMaxRows = Math.Clamp(ParseInt(WidgetHistoryMaxRowsBox.Text, widget.HistoryMaxRows), 10, 10000);
         widget.ChartSource = WidgetChartSourceCombo.SelectedItem is ChartDataSource chartSource ? chartSource : ChartDataSource.LivePlc;
         widget.AlarmHistoryRetentionDays = Math.Clamp(ParseInt(WidgetAlarmHistoryRetentionBox.Text, widget.AlarmHistoryRetentionDays), 1, 3650);
-        widget.Animation.Enabled = widget.Type == HmiWidgetType.Indicator || WidgetAnimationEnabledCheck.IsChecked == true;
-        widget.Animation.TagId = WidgetAnimationTagCombo.SelectedValue as string ?? string.Empty;
-        widget.Animation.Condition = WidgetAnimationConditionCombo.SelectedItem is AlarmCondition condition ? condition : AlarmCondition.True;
-        widget.Animation.CompareValue = WidgetAnimationValueBox.Text.Trim();
-        widget.Animation.ActiveBackground = WidgetActiveBackgroundBox.Text.Trim();
-        widget.Animation.InactiveBackground = WidgetInactiveBackgroundBox.Text.Trim();
-        widget.Animation.ActiveForeground = WidgetActiveForegroundBox.Text.Trim();
-        widget.Animation.InactiveForeground = WidgetInactiveForegroundBox.Text.Trim();
-        if (widget.Type == HmiWidgetType.Indicator)
+        if (SupportsDynamicAppearance(widget.Type))
         {
-            widget.TagId = widget.Animation.TagId;
+            widget.Animation.Enabled = WidgetAnimationEnabledCheck.IsChecked == true;
+            widget.Animation.TagId = WidgetAnimationTagCombo.SelectedValue as string ?? string.Empty;
+            widget.Animation.DefaultBackground = string.IsNullOrWhiteSpace(WidgetAnimationDefaultBackgroundBox.Text)
+                ? widget.Type == HmiWidgetType.Indicator ? "#526273" : widget.Background
+                : WidgetAnimationDefaultBackgroundBox.Text.Trim();
+            widget.Animation.DefaultForeground = string.IsNullOrWhiteSpace(WidgetAnimationDefaultForegroundBox.Text)
+                ? widget.Foreground
+                : WidgetAnimationDefaultForegroundBox.Text.Trim();
+            if (widget.Type == HmiWidgetType.Indicator)
+            {
+                widget.TagId = widget.Animation.TagId;
+            }
         }
-        MarkDirty();
+        if (!string.Equals(originalWidgetState, JsonSerializer.Serialize(widget), StringComparison.Ordinal))
+        {
+            MarkDirty();
+        }
         RenderDesigner();
         ShowWidgetInspector();
     }
@@ -2686,19 +2918,578 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ActiveBackgroundSwatch_Click(object sender, RoutedEventArgs e) => ApplyAnimationSwatch(sender, WidgetActiveBackgroundBox);
-    private void InactiveBackgroundSwatch_Click(object sender, RoutedEventArgs e) => ApplyAnimationSwatch(sender, WidgetInactiveBackgroundBox);
-    private void ActiveForegroundSwatch_Click(object sender, RoutedEventArgs e) => ApplyAnimationSwatch(sender, WidgetActiveForegroundBox);
-    private void InactiveForegroundSwatch_Click(object sender, RoutedEventArgs e) => ApplyAnimationSwatch(sender, WidgetInactiveForegroundBox);
+    private void AnimationOption_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_updatingInspector || _selectedWidget is null || !SupportsDynamicAppearance(_selectedWidget.Type))
+        {
+            return;
+        }
+        _selectedWidget.Animation.Enabled = WidgetAnimationEnabledCheck.IsChecked == true;
+        SyncLegacyAnimationFields(_selectedWidget.Animation);
+        MarkDirty();
+        RenderDesigner();
+        UpdateAnimationValidation(_selectedWidget);
+    }
 
-    private void ApplyAnimationSwatch(object sender, TextBox target)
+    private void WidgetAnimationTagCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_updatingInspector || _selectedWidget is null || !SupportsDynamicAppearance(_selectedWidget.Type))
+        {
+            return;
+        }
+        CommitAnimationRuleEditor();
+        _selectedWidget.Animation.TagId = WidgetAnimationTagCombo.SelectedValue as string ?? string.Empty;
+        if (_selectedWidget.Type == HmiWidgetType.Indicator)
+        {
+            _selectedWidget.TagId = _selectedWidget.Animation.TagId;
+        }
+        MarkDirty();
+        RefreshAnimationRuleEditor(_selectedWidget, _editingAnimationRuleId);
+        UpdateAnimationValidation(_selectedWidget);
+    }
+
+    private void RefreshAnimationRuleEditor(HmiWidgetDefinition widget, string? selectedRuleId = null)
+    {
+        var wasUpdating = _updatingInspector;
+        _updatingInspector = true;
+        try
+        {
+            if (!SupportsDynamicAppearance(widget.Type))
+            {
+                WidgetAnimationRuleList.ItemsSource = null;
+                WidgetAnimationRuleEditor.Visibility = Visibility.Collapsed;
+                _editingAnimationRuleId = null;
+                return;
+            }
+            var items = widget.Animation.Rules.Select((rule, index) => new AnimationRuleEditorItem(
+                rule,
+                index + 1,
+                string.IsNullOrWhiteSpace(rule.Name) ? $"Stato {index + 1}" : rule.Name,
+                DynamicConditionSummary(rule),
+                string.IsNullOrWhiteSpace(rule.Background) ? widget.Animation.DefaultBackground : rule.Background)).ToList();
+            WidgetAnimationRuleList.ItemsSource = null;
+            WidgetAnimationRuleList.ItemsSource = items;
+            var selected = items.FirstOrDefault(item => item.Rule.Id == selectedRuleId)
+                ?? items.FirstOrDefault(item => item.Rule.Id == _editingAnimationRuleId)
+                ?? items.FirstOrDefault();
+            WidgetAnimationRuleList.SelectedItem = selected;
+            _editingAnimationRuleId = selected?.Rule.Id;
+            PopulateAnimationRuleEditor(widget, selected?.Rule);
+        }
+        finally
+        {
+            _updatingInspector = wasUpdating;
+        }
+    }
+
+    private void PopulateAnimationRuleEditor(HmiWidgetDefinition widget, HmiAnimationRuleDefinition? rule)
+    {
+        WidgetAnimationRuleEditor.Visibility = rule is null ? Visibility.Collapsed : Visibility.Visible;
+        WidgetAnimationRuleNameBox.Text = rule?.Name ?? string.Empty;
+        WidgetAnimationRuleEnabledCheck.IsChecked = rule?.Enabled == true;
+        var sourceType = GetAnimationSourceTag(widget)?.DataType;
+        var conditionOptions = AnimationConditionOptions
+            .Where(option => IsDynamicConditionCompatible(sourceType, option.Value))
+            .ToList();
+        if (rule is not null && conditionOptions.All(option => option.Value != rule.Condition))
+        {
+            var legacyOption = AnimationConditionOptions.First(option => option.Value == rule.Condition);
+            conditionOptions.Add(new AnimationConditionOption(legacyOption.Value, legacyOption.Label + " (non compatibile)"));
+        }
+        WidgetAnimationRuleConditionCombo.ItemsSource = conditionOptions;
+        WidgetAnimationRuleConditionCombo.SelectedValue = rule?.Condition ?? HmiDynamicCondition.Equals;
+        WidgetAnimationOperand1Box.Text = rule?.CompareValue ?? string.Empty;
+        WidgetAnimationOperand2Box.Text = rule?.CompareValue2 ?? string.Empty;
+        WidgetAnimationRuleBackgroundBox.Text = rule?.Background ?? string.Empty;
+        WidgetAnimationRuleForegroundBox.Text = rule?.Foreground ?? string.Empty;
+        UpdateAnimationConditionEditor(rule?.Condition ?? HmiDynamicCondition.Equals);
+    }
+
+    private void WidgetAnimationRuleList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_updatingInspector || WidgetAnimationRuleList.SelectedItem is not AnimationRuleEditorItem item)
+        {
+            return;
+        }
+        if (_editingAnimationRuleId == item.Rule.Id)
+        {
+            return;
+        }
+        CommitAnimationRuleEditor();
+        _editingAnimationRuleId = item.Rule.Id;
+        if (_selectedWidget is not null)
+        {
+            RefreshAnimationRuleEditor(_selectedWidget, item.Rule.Id);
+        }
+    }
+
+    private void WidgetAnimationRuleConditionCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_updatingInspector && WidgetAnimationRuleConditionCombo.SelectedValue is HmiDynamicCondition condition)
+        {
+            UpdateAnimationConditionEditor(condition);
+            CommitAnimationRuleEditor();
+        }
+    }
+
+    private void UpdateAnimationConditionEditor(HmiDynamicCondition condition)
+    {
+        var hasFirstOperand = condition is not (HmiDynamicCondition.True or HmiDynamicCondition.False);
+        var hasSecondOperand = condition is HmiDynamicCondition.BetweenInclusive or HmiDynamicCondition.BitMaskEquals;
+        WidgetAnimationOperand1Group.Visibility = hasFirstOperand ? Visibility.Visible : Visibility.Collapsed;
+        WidgetAnimationOperand2Group.Visibility = hasSecondOperand ? Visibility.Visible : Visibility.Collapsed;
+        WidgetAnimationOperand1Label.Text = condition switch
+        {
+            HmiDynamicCondition.BetweenInclusive => "Valore minimo incluso",
+            HmiDynamicCondition.BitSet or HmiDynamicCondition.BitClear => $"Indice bit (0-{GetAnimationMaximumBit()})",
+            HmiDynamicCondition.BitMaskEquals => "Maschera bit (decimale o 0x...) ",
+            _ => "Valore confronto"
+        };
+        WidgetAnimationOperand2Label.Text = condition == HmiDynamicCondition.BitMaskEquals
+            ? "Valore atteso dopo la maschera"
+            : "Valore massimo incluso";
+    }
+
+    private void NewAnimationRule_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedWidget is null || !SupportsDynamicAppearance(_selectedWidget.Type))
+        {
+            return;
+        }
+        CommitAnimationRuleEditor();
+        var sourceType = GetAnimationSourceTag(_selectedWidget)?.DataType;
+        var rule = new HmiAnimationRuleDefinition
+        {
+            Name = $"Stato {_selectedWidget.Animation.Rules.Count + 1}",
+            Condition = sourceType == TagDataType.Bool ? HmiDynamicCondition.True : HmiDynamicCondition.Equals,
+            CompareValue = sourceType == TagDataType.String ? string.Empty : "0",
+            Background = ChartSeriesPalette[_selectedWidget.Animation.Rules.Count % ChartSeriesPalette.Length],
+            Foreground = _selectedWidget.Foreground
+        };
+        _selectedWidget.Animation.Rules.Add(rule);
+        _editingAnimationRuleId = rule.Id;
+        WidgetDynamicsSection.IsExpanded = true;
+        SyncLegacyAnimationFields(_selectedWidget.Animation);
+        MarkDirty();
+        RenderDesigner();
+        RefreshAnimationRuleEditor(_selectedWidget, rule.Id);
+        UpdateAnimationValidation(_selectedWidget);
+    }
+
+    private void DuplicateAnimationRule_Click(object sender, RoutedEventArgs e)
+    {
+        CommitAnimationRuleEditor();
+        if (_selectedWidget is null || GetEditingAnimationRule() is not { } source)
+        {
+            return;
+        }
+        var duplicate = new HmiAnimationRuleDefinition
+        {
+            Name = source.Name + " copia",
+            Enabled = source.Enabled,
+            Condition = source.Condition,
+            CompareValue = source.CompareValue,
+            CompareValue2 = source.CompareValue2,
+            Background = source.Background,
+            Foreground = source.Foreground
+        };
+        var sourceIndex = _selectedWidget.Animation.Rules.IndexOf(source);
+        _selectedWidget.Animation.Rules.Insert(sourceIndex + 1, duplicate);
+        _editingAnimationRuleId = duplicate.Id;
+        SyncLegacyAnimationFields(_selectedWidget.Animation);
+        MarkDirty();
+        RenderDesigner();
+        RefreshAnimationRuleEditor(_selectedWidget, duplicate.Id);
+        UpdateAnimationValidation(_selectedWidget);
+    }
+
+    private void MoveAnimationRuleUp_Click(object sender, RoutedEventArgs e) => MoveAnimationRule(-1);
+    private void MoveAnimationRuleDown_Click(object sender, RoutedEventArgs e) => MoveAnimationRule(1);
+
+    private void MoveAnimationRule(int direction)
+    {
+        CommitAnimationRuleEditor();
+        if (_selectedWidget is null || GetEditingAnimationRule() is not { } rule)
+        {
+            return;
+        }
+        var rules = _selectedWidget.Animation.Rules;
+        var index = rules.IndexOf(rule);
+        var targetIndex = index + direction;
+        if (index < 0 || targetIndex < 0 || targetIndex >= rules.Count)
+        {
+            return;
+        }
+        rules.RemoveAt(index);
+        rules.Insert(targetIndex, rule);
+        SyncLegacyAnimationFields(_selectedWidget.Animation);
+        MarkDirty();
+        RenderDesigner();
+        RefreshAnimationRuleEditor(_selectedWidget, rule.Id);
+        UpdateAnimationValidation(_selectedWidget);
+    }
+
+    private void DeleteAnimationRule_Click(object sender, RoutedEventArgs e)
+    {
+        CommitAnimationRuleEditor();
+        if (_selectedWidget is null || GetEditingAnimationRule() is not { } rule)
+        {
+            return;
+        }
+        var rules = _selectedWidget.Animation.Rules;
+        var removedIndex = rules.IndexOf(rule);
+        rules.Remove(rule);
+        var next = rules.ElementAtOrDefault(Math.Min(Math.Max(0, removedIndex), Math.Max(0, rules.Count - 1)));
+        _editingAnimationRuleId = next?.Id;
+        SyncLegacyAnimationFields(_selectedWidget.Animation);
+        MarkDirty();
+        RenderDesigner();
+        RefreshAnimationRuleEditor(_selectedWidget, next?.Id);
+        UpdateAnimationValidation(_selectedWidget);
+    }
+
+    private void SaveAnimationRule_Click(object sender, RoutedEventArgs e) => SaveAnimationRuleFromEditor();
+
+    private void SaveAnimationRuleFromEditor()
+    {
+        if (_selectedWidget is null || GetEditingAnimationRule() is not { } rule)
+        {
+            return;
+        }
+        CommitAnimationRuleEditor();
+        RenderDesigner();
+        RefreshAnimationRuleEditor(_selectedWidget, rule.Id);
+        UpdateAnimationValidation(_selectedWidget);
+    }
+
+    private bool CommitAnimationRuleEditor()
+    {
+        if (_updatingInspector || _selectedWidget is null || GetEditingAnimationRule() is not { } rule)
+        {
+            return false;
+        }
+
+        var name = string.IsNullOrWhiteSpace(WidgetAnimationRuleNameBox.Text) ? "Stato" : WidgetAnimationRuleNameBox.Text.Trim();
+        var enabled = WidgetAnimationRuleEnabledCheck.IsChecked == true;
+        var condition = WidgetAnimationRuleConditionCombo.SelectedValue is HmiDynamicCondition selectedCondition
+            ? selectedCondition
+            : rule.Condition;
+        var compareValue = WidgetAnimationOperand1Box.Text.Trim();
+        var compareValue2 = WidgetAnimationOperand2Box.Text.Trim();
+        var background = string.IsNullOrWhiteSpace(WidgetAnimationRuleBackgroundBox.Text)
+            ? _selectedWidget.Animation.DefaultBackground
+            : WidgetAnimationRuleBackgroundBox.Text.Trim();
+        var foreground = string.IsNullOrWhiteSpace(WidgetAnimationRuleForegroundBox.Text)
+            ? _selectedWidget.Animation.DefaultForeground
+            : WidgetAnimationRuleForegroundBox.Text.Trim();
+        var changed = rule.Name != name || rule.Enabled != enabled || rule.Condition != condition ||
+            rule.CompareValue != compareValue || rule.CompareValue2 != compareValue2 ||
+            rule.Background != background || rule.Foreground != foreground;
+        if (!changed)
+        {
+            return false;
+        }
+
+        rule.Name = name;
+        rule.Enabled = enabled;
+        rule.Condition = condition;
+        rule.CompareValue = compareValue;
+        rule.CompareValue2 = compareValue2;
+        rule.Background = background;
+        rule.Foreground = foreground;
+        SyncLegacyAnimationFields(_selectedWidget.Animation);
+        MarkDirty();
+        UpdateAnimationValidation(_selectedWidget);
+        return true;
+    }
+
+    private void AnimationRuleEditor_LostFocus(object sender, RoutedEventArgs e) => CommitAnimationRuleEditor();
+
+    private void AnimationRuleEditor_Click(object sender, RoutedEventArgs e) => CommitAnimationRuleEditor();
+
+    private HmiAnimationRuleDefinition? GetEditingAnimationRule() => _selectedWidget?.Animation.Rules
+        .FirstOrDefault(rule => rule.Id == _editingAnimationRuleId);
+
+    private void AnimationRuleBackgroundSwatch_Click(object sender, RoutedEventArgs e)
     {
         if (sender is Button { Tag: string color })
         {
-            target.Text = color;
-            ApplyWidgetInspector();
+            WidgetAnimationRuleBackgroundBox.Text = color;
+            SaveAnimationRuleFromEditor();
         }
     }
+
+    private void AnimationRuleForegroundSwatch_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string color })
+        {
+            WidgetAnimationRuleForegroundBox.Text = color;
+            SaveAnimationRuleFromEditor();
+        }
+    }
+
+    private void AnimationDefaultBackgroundSwatch_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string color })
+        {
+            WidgetAnimationDefaultBackgroundBox.Text = color;
+            SaveAnimationDefaults();
+        }
+    }
+
+    private void AnimationDefaultForegroundSwatch_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string color })
+        {
+            WidgetAnimationDefaultForegroundBox.Text = color;
+            SaveAnimationDefaults();
+        }
+    }
+
+    private void AnimationDefault_LostFocus(object sender, RoutedEventArgs e) => SaveAnimationDefaults();
+
+    private void SaveAnimationDefaults()
+    {
+        if (_updatingInspector || _selectedWidget is null || !SupportsDynamicAppearance(_selectedWidget.Type))
+        {
+            return;
+        }
+        _selectedWidget.Animation.DefaultBackground = string.IsNullOrWhiteSpace(WidgetAnimationDefaultBackgroundBox.Text)
+            ? _selectedWidget.Type == HmiWidgetType.Indicator ? "#526273" : _selectedWidget.Background
+            : WidgetAnimationDefaultBackgroundBox.Text.Trim();
+        _selectedWidget.Animation.DefaultForeground = string.IsNullOrWhiteSpace(WidgetAnimationDefaultForegroundBox.Text)
+            ? _selectedWidget.Foreground
+            : WidgetAnimationDefaultForegroundBox.Text.Trim();
+        SyncLegacyAnimationFields(_selectedWidget.Animation);
+        MarkDirty();
+        RenderDesigner();
+        UpdateAnimationValidation(_selectedWidget);
+    }
+
+    private TagDefinition? GetAnimationSourceTag(HmiWidgetDefinition widget) =>
+        _project.Tags.FirstOrDefault(tag => tag.Id == widget.Animation.TagId);
+
+    private int GetAnimationMaximumBit() => GetDynamicMaximumBit(
+        _selectedWidget is null ? null : GetAnimationSourceTag(_selectedWidget)?.DataType);
+
+    private static int GetDynamicMaximumBit(TagDataType? dataType) => dataType == TagDataType.Int ? 15 : 31;
+
+    private static bool IsDynamicConditionCompatible(TagDataType? dataType, HmiDynamicCondition condition) => dataType switch
+    {
+        null => true,
+        TagDataType.Bool => condition is HmiDynamicCondition.True or HmiDynamicCondition.False or
+            HmiDynamicCondition.Equals or HmiDynamicCondition.NotEquals,
+        TagDataType.String => condition is HmiDynamicCondition.Equals or HmiDynamicCondition.NotEquals,
+        TagDataType.Real => condition is HmiDynamicCondition.Equals or HmiDynamicCondition.NotEquals or
+            HmiDynamicCondition.GreaterThan or HmiDynamicCondition.GreaterThanOrEqual or
+            HmiDynamicCondition.LessThan or HmiDynamicCondition.LessThanOrEqual or HmiDynamicCondition.BetweenInclusive,
+        TagDataType.Int or TagDataType.DInt => condition is HmiDynamicCondition.Equals or HmiDynamicCondition.NotEquals or
+            HmiDynamicCondition.GreaterThan or HmiDynamicCondition.GreaterThanOrEqual or
+            HmiDynamicCondition.LessThan or HmiDynamicCondition.LessThanOrEqual or HmiDynamicCondition.BetweenInclusive or
+            HmiDynamicCondition.BitSet or HmiDynamicCondition.BitClear or HmiDynamicCondition.BitMaskEquals,
+        _ => false
+    };
+
+    private void UpdateAnimationValidation(HmiWidgetDefinition widget)
+    {
+        var issues = new List<string>();
+        var sourceTag = GetAnimationSourceTag(widget);
+        if (widget.Animation.Enabled && string.IsNullOrWhiteSpace(widget.Animation.TagId))
+        {
+            issues.Add("Selezionare una tag sorgente.");
+        }
+        else if (widget.Animation.Enabled && sourceTag is null)
+        {
+            issues.Add("La tag sorgente non è disponibile.");
+        }
+        else if (widget.Animation.Enabled && sourceTag?.Access == TagAccess.Write)
+        {
+            issues.Add("La tag sorgente è di sola scrittura e non può pilotare una dinamica.");
+        }
+        if (widget.Animation.Enabled && widget.Animation.Rules.All(rule => !rule.Enabled))
+        {
+            issues.Add("Nessuna regola è abilitata: verrà usato sempre lo stato predefinito.");
+        }
+        if (!IsValidBrushCode(widget.Animation.DefaultBackground))
+        {
+            issues.Add("Il colore predefinito di sfondo / riempimento non è valido.");
+        }
+        if (widget.Type != HmiWidgetType.Indicator && !IsValidBrushCode(widget.Animation.DefaultForeground))
+        {
+            issues.Add("Il colore predefinito del testo non è valido.");
+        }
+        foreach (var rule in widget.Animation.Rules.Where(rule => rule.Enabled))
+        {
+            if (!TryValidateDynamicRule(rule, sourceTag, out var issue))
+            {
+                issues.Add($"{rule.Name}: {issue}");
+            }
+            if (!IsValidBrushCode(rule.Background))
+            {
+                issues.Add($"{rule.Name}: il colore di sfondo / riempimento non è valido");
+            }
+            if (widget.Type != HmiWidgetType.Indicator && !IsValidBrushCode(rule.Foreground))
+            {
+                issues.Add($"{rule.Name}: il colore del testo non è valido");
+            }
+        }
+        var ranges = widget.Animation.Rules.Where(rule => rule.Enabled && rule.Condition == HmiDynamicCondition.BetweenInclusive)
+            .Select(rule => new { Rule = rule, Min = TryParseDynamicNumber(rule.CompareValue, out var min) ? min : double.NaN, Max = TryParseDynamicNumber(rule.CompareValue2, out var max) ? max : double.NaN })
+            .Where(item => !double.IsNaN(item.Min) && !double.IsNaN(item.Max) && item.Min <= item.Max)
+            .ToList();
+        for (var first = 0; first < ranges.Count; first++)
+        {
+            for (var second = first + 1; second < ranges.Count; second++)
+            {
+                if (ranges[first].Min <= ranges[second].Max && ranges[second].Min <= ranges[first].Max)
+                {
+                    issues.Add($"Gli intervalli '{ranges[first].Rule.Name}' e '{ranges[second].Rule.Name}' si sovrappongono: prevale il primo.");
+                }
+            }
+        }
+        WidgetAnimationValidationText.Text = string.Join(Environment.NewLine, issues.Distinct());
+        WidgetAnimationValidationText.Visibility = issues.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private static bool TryValidateDynamicRule(HmiAnimationRuleDefinition rule, TagDefinition? sourceTag, out string issue)
+    {
+        issue = string.Empty;
+        if (sourceTag is not null && !IsDynamicConditionCompatible(sourceTag.DataType, rule.Condition))
+        {
+            issue = $"la condizione non è compatibile con una tag {sourceTag.DataType}";
+            return false;
+        }
+        switch (rule.Condition)
+        {
+            case HmiDynamicCondition.True:
+            case HmiDynamicCondition.False:
+                return true;
+            case HmiDynamicCondition.Equals:
+            case HmiDynamicCondition.NotEquals:
+                if (TryValidateDynamicEqualityOperand(rule.CompareValue, sourceTag?.DataType))
+                {
+                    return true;
+                }
+                issue = sourceTag?.DataType switch
+                {
+                    TagDataType.Bool => "il valore di confronto deve essere booleano (true/false, vero/falso oppure 1/0)",
+                    TagDataType.Int or TagDataType.DInt => "il valore di confronto deve essere un intero valido per la tag",
+                    TagDataType.Real => "il valore di confronto deve essere numerico e finito",
+                    _ => "indicare il valore di confronto"
+                };
+                return false;
+            case HmiDynamicCondition.GreaterThan:
+            case HmiDynamicCondition.GreaterThanOrEqual:
+            case HmiDynamicCondition.LessThan:
+            case HmiDynamicCondition.LessThanOrEqual:
+                if (TryValidateDynamicNumericOperand(rule.CompareValue, sourceTag?.DataType))
+                {
+                    return true;
+                }
+                issue = "il valore di confronto deve essere numerico";
+                return false;
+            case HmiDynamicCondition.BetweenInclusive:
+                if (!TryValidateDynamicNumericOperand(rule.CompareValue, sourceTag?.DataType) ||
+                    !TryValidateDynamicNumericOperand(rule.CompareValue2, sourceTag?.DataType) ||
+                    !TryParseDynamicNumber(rule.CompareValue, out var minimum) ||
+                    !TryParseDynamicNumber(rule.CompareValue2, out var maximum))
+                {
+                    issue = "i limiti dell'intervallo devono essere numerici";
+                    return false;
+                }
+                if (minimum > maximum)
+                {
+                    issue = "il limite minimo è maggiore del massimo";
+                    return false;
+                }
+                return true;
+            case HmiDynamicCondition.BitSet:
+            case HmiDynamicCondition.BitClear:
+                var maximumBit = GetDynamicMaximumBit(sourceTag?.DataType);
+                if (int.TryParse(rule.CompareValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var bit) && bit >= 0 && bit <= maximumBit)
+                {
+                    return true;
+                }
+                issue = $"l'indice bit deve essere compreso tra 0 e {maximumBit}";
+                return false;
+            case HmiDynamicCondition.BitMaskEquals:
+                if (TryGetDynamicUnsignedInteger(rule.CompareValue, sourceTag?.DataType, out _) &&
+                    TryGetDynamicUnsignedInteger(rule.CompareValue2, sourceTag?.DataType, out _))
+                {
+                    return true;
+                }
+                issue = "maschera e valore atteso devono essere interi";
+                return false;
+            default:
+                issue = "condizione non supportata";
+                return false;
+        }
+    }
+
+    private static bool TryValidateDynamicEqualityOperand(string? value, TagDataType? dataType) => dataType switch
+    {
+        TagDataType.Bool => TryConvertDynamicBoolean(value, out _),
+        TagDataType.Int or TagDataType.DInt or TagDataType.Real => TryValidateDynamicNumericOperand(value, dataType),
+        _ => !string.IsNullOrWhiteSpace(value)
+    };
+
+    private static bool TryValidateDynamicNumericOperand(string? value, TagDataType? dataType)
+    {
+        if (!TryParseDynamicNumber(value, out var number))
+        {
+            return false;
+        }
+        return dataType switch
+        {
+            TagDataType.Int => number == Math.Truncate(number) && number >= short.MinValue && number <= short.MaxValue,
+            TagDataType.DInt => number == Math.Truncate(number) && number >= int.MinValue && number <= int.MaxValue,
+            TagDataType.Real or null => true,
+            _ => false
+        };
+    }
+
+    private static string DynamicConditionSummary(HmiAnimationRuleDefinition rule) => rule.Condition switch
+    {
+        HmiDynamicCondition.True => "Valore vero",
+        HmiDynamicCondition.False => "Valore falso",
+        HmiDynamicCondition.Equals => $"Valore = {rule.CompareValue}",
+        HmiDynamicCondition.NotEquals => $"Valore ≠ {rule.CompareValue}",
+        HmiDynamicCondition.GreaterThan => $"Valore > {rule.CompareValue}",
+        HmiDynamicCondition.GreaterThanOrEqual => $"Valore ≥ {rule.CompareValue}",
+        HmiDynamicCondition.LessThan => $"Valore < {rule.CompareValue}",
+        HmiDynamicCondition.LessThanOrEqual => $"Valore ≤ {rule.CompareValue}",
+        HmiDynamicCondition.BetweenInclusive => $"{rule.CompareValue} ≤ valore ≤ {rule.CompareValue2}",
+        HmiDynamicCondition.BitSet => $"Bit {rule.CompareValue} = 1",
+        HmiDynamicCondition.BitClear => $"Bit {rule.CompareValue} = 0",
+        HmiDynamicCondition.BitMaskEquals => $"(valore & {rule.CompareValue}) = {rule.CompareValue2}",
+        _ => rule.Condition.ToString()
+    } + (rule.Enabled ? string.Empty : " · disabilitata");
+
+    private static void SyncLegacyAnimationFields(HmiAnimationDefinition animation)
+    {
+        animation.InactiveBackground = animation.DefaultBackground;
+        animation.InactiveForeground = animation.DefaultForeground;
+        var first = animation.Rules.FirstOrDefault(rule => rule.Enabled) ?? animation.Rules.FirstOrDefault();
+        if (first is null)
+        {
+            return;
+        }
+        animation.Condition = first.Condition switch
+        {
+            HmiDynamicCondition.True => AlarmCondition.True,
+            HmiDynamicCondition.False => AlarmCondition.False,
+            HmiDynamicCondition.NotEquals => AlarmCondition.NotEquals,
+            HmiDynamicCondition.GreaterThan or HmiDynamicCondition.GreaterThanOrEqual => AlarmCondition.GreaterThan,
+            HmiDynamicCondition.LessThan or HmiDynamicCondition.LessThanOrEqual => AlarmCondition.LessThan,
+            _ => AlarmCondition.Equals
+        };
+        animation.CompareValue = first.CompareValue;
+        animation.ActiveBackground = first.Background;
+        animation.ActiveForeground = first.Foreground;
+    }
+
+    private static Visibility AnyVisible(params UIElement[] elements) =>
+        elements.Any(element => element.Visibility == Visibility.Visible) ? Visibility.Visible : Visibility.Collapsed;
 
     private void RefreshChartSeriesEditor(HmiWidgetDefinition widget, string? selectedSeriesId = null)
     {
@@ -3006,6 +3797,19 @@ public partial class MainWindow : Window
                     ?? string.Empty;
                 widget.Animation.Enabled = true;
                 widget.Animation.TagId = widget.TagId;
+                widget.Animation.DefaultBackground = "#526273";
+                widget.Animation.DefaultForeground = "#8FA0B3";
+                widget.Animation.Rules =
+                [
+                    new HmiAnimationRuleDefinition
+                    {
+                        Name = "Stato attivo",
+                        Condition = HmiDynamicCondition.True,
+                        CompareValue = "true",
+                        Background = "#22C78A",
+                        Foreground = "#F8FAFC"
+                    }
+                ];
                 widget.Animation.Condition = AlarmCondition.True;
                 widget.Animation.ActiveBackground = "#22C78A";
                 widget.Animation.InactiveBackground = "#526273";
@@ -3115,6 +3919,11 @@ public partial class MainWindow : Window
                 widget.RequiredAccessLevel = 0;
                 widget.TextAlignment = HmiTextAlignment.Center;
                 break;
+        }
+        if (type != HmiWidgetType.Indicator)
+        {
+            widget.Animation.DefaultBackground = widget.Background;
+            widget.Animation.DefaultForeground = widget.Foreground;
         }
         return widget;
     }
@@ -3667,8 +4476,7 @@ public partial class MainWindow : Window
         _runtimeMode = true;
         _allowRuntimeClose = false;
         _runtimeExitInProgress = false;
-        LeftSidebarColumn.Width = new GridLength(0);
-        RightSidebarColumn.Width = new GridLength(0);
+        HideEditorSidebarsForRuntime();
         TopBarRow.Height = new GridLength(0);
         BottomBarRow.Height = new GridLength(0);
         WorkspaceToolbarRow.Height = new GridLength(0);
@@ -3777,8 +4585,7 @@ public partial class MainWindow : Window
         _runtimeExitInProgress = false;
         _runtimeBindings.Clear();
         _displayedRuntimeWidgets.Clear();
-        LeftSidebarColumn.Width = new GridLength(248);
-        RightSidebarColumn.Width = new GridLength(330);
+        RestoreEditorSidebarsAfterRuntime();
         TopBarRow.Height = new GridLength(68);
         BottomBarRow.Height = new GridLength(30);
         WorkspaceToolbarRow.Height = new GridLength(44);
@@ -4123,6 +4930,7 @@ public partial class MainWindow : Window
         }
         binding.Widget = widget;
         binding.Root = visual;
+        ApplyWidgetAnimationFallback(widget);
         if (widget.Type == HmiWidgetType.TrendChart)
         {
             foreach (var series in widget.ChartSeries)
@@ -4545,11 +5353,6 @@ public partial class MainWindow : Window
         {
             binding.ValueText.Text = FormatTagValue(value, widget.Decimals) + widget.Suffix;
         }
-        if (binding.Indicator is not null)
-        {
-            var active = IsConditionMet(widget.Animation.Condition, widget.Animation.CompareValue, value);
-            ApplyIndicatorColors(widget, binding.Indicator, active);
-        }
         if (binding.Input is not null && !binding.Input.IsKeyboardFocusWithin)
         {
             binding.Input.Text = FormatTagValue(value, widget.Decimals);
@@ -4562,28 +5365,208 @@ public partial class MainWindow : Window
         {
             return;
         }
-        var active = IsConditionMet(widget.Animation.Condition, widget.Animation.CompareValue, value);
-        if (binding.Indicator is not null)
+        var sourceTag = GetAnimationSourceTag(widget);
+        var sourceDataType = sourceTag?.DataType;
+        var matchingRule = widget.Animation.Rules.FirstOrDefault(rule =>
+            rule.Enabled && IsDynamicConditionCompatible(sourceDataType, rule.Condition) &&
+            TryValidateDynamicRule(rule, sourceTag, out _) &&
+            IsDynamicConditionMet(rule, value, sourceDataType));
+        ApplyDynamicAppearance(widget, binding, matchingRule);
+    }
+
+    private void ApplyWidgetAnimationFallback(HmiWidgetDefinition widget)
+    {
+        if (!widget.Animation.Enabled || !_runtimeBindings.TryGetValue(widget.Id, out var binding) || binding.Root is null)
         {
-            ApplyIndicatorColors(widget, binding.Indicator, active);
             return;
         }
+        ApplyDynamicAppearance(widget, binding, null);
+    }
+
+    private static void ApplyDynamicAppearance(HmiWidgetDefinition widget, RuntimeWidgetBinding binding, HmiAnimationRuleDefinition? matchingRule)
+    {
+        var root = binding.Root;
+        if (root is null)
+        {
+            return;
+        }
+        if (binding.Indicator is not null)
+        {
+            var indicatorColor = ResolveDynamicColor(
+                matchingRule?.Background, widget.Animation.DefaultBackground, null, "#526273");
+            ApplyIndicatorColor(binding.Indicator, indicatorColor, matchingRule is not null);
+            return;
+        }
+        var backgroundCode = ResolveDynamicColor(
+            matchingRule?.Background, widget.Animation.DefaultBackground, widget.Background, "#253244");
+        var foregroundCode = ResolveDynamicColor(
+            matchingRule?.Foreground, widget.Animation.DefaultForeground, widget.Foreground, "#F8FAFC");
         var hideNumericBackground = (widget.Type is HmiWidgetType.ValueDisplay or HmiWidgetType.NumericInput) && !widget.ShowBackground;
         var background = hideNumericBackground
             ? Brushes.Transparent
-            : BrushOf(active ? widget.Animation.ActiveBackground : widget.Animation.InactiveBackground, widget.Background);
-        var foreground = BrushOf(active ? widget.Animation.ActiveForeground : widget.Animation.InactiveForeground, widget.Foreground);
-        ApplyDynamicColors(binding.Root, background, foreground);
+            : BrushOf(backgroundCode, "#253244");
+        var foreground = BrushOf(foregroundCode, "#F8FAFC");
+        ApplyDynamicColors(root, background, foreground);
     }
 
-    private static void ApplyIndicatorColors(HmiWidgetDefinition widget, Ellipse indicator, bool active)
+    private static string ResolveDynamicColor(string? ruleColor, string? defaultColor, string? staticColor, string finalFallback)
     {
-        var activeColor = string.IsNullOrWhiteSpace(widget.Animation.ActiveBackground) ? "#22C78A" : widget.Animation.ActiveBackground;
-        var inactiveColor = string.IsNullOrWhiteSpace(widget.Animation.InactiveBackground) ? "#526273" : widget.Animation.InactiveBackground;
-        var color = active ? activeColor : inactiveColor;
-        indicator.Fill = BrushOf(color, active ? "#22C78A" : "#526273");
-        indicator.Stroke = BrushOf(color, active ? "#73F0BF" : "#718196");
-        indicator.Opacity = active ? 1 : 0.88;
+        if (IsValidBrushCode(ruleColor))
+        {
+            return ruleColor!.Trim();
+        }
+        if (IsValidBrushCode(defaultColor))
+        {
+            return defaultColor!.Trim();
+        }
+        return IsValidBrushCode(staticColor) ? staticColor!.Trim() : finalFallback;
+    }
+
+    private static void ApplyIndicatorColor(Ellipse indicator, string? colorCode, bool matched)
+    {
+        var color = string.IsNullOrWhiteSpace(colorCode) ? "#526273" : colorCode;
+        indicator.Fill = BrushOf(color, "#526273");
+        indicator.Stroke = BrushOf(color, "#718196");
+        indicator.Opacity = matched ? 1 : 0.88;
+    }
+
+    private static bool IsDynamicConditionMet(HmiAnimationRuleDefinition rule, object value, TagDataType? sourceDataType)
+    {
+        var valueText = Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
+        var hasBooleanValue = TryConvertDynamicBoolean(valueText, out var valueBoolean);
+        return rule.Condition switch
+        {
+            HmiDynamicCondition.True => hasBooleanValue && valueBoolean,
+            HmiDynamicCondition.False => hasBooleanValue && !valueBoolean,
+            HmiDynamicCondition.Equals => DynamicValuesEqual(valueText, rule.CompareValue, sourceDataType),
+            HmiDynamicCondition.NotEquals => !DynamicValuesEqual(valueText, rule.CompareValue, sourceDataType),
+            HmiDynamicCondition.GreaterThan => DynamicNumericCompare(valueText, rule.CompareValue, result => result > 0),
+            HmiDynamicCondition.GreaterThanOrEqual => DynamicNumericCompare(valueText, rule.CompareValue, result => result >= 0),
+            HmiDynamicCondition.LessThan => DynamicNumericCompare(valueText, rule.CompareValue, result => result < 0),
+            HmiDynamicCondition.LessThanOrEqual => DynamicNumericCompare(valueText, rule.CompareValue, result => result <= 0),
+            HmiDynamicCondition.BetweenInclusive => TryParseDynamicNumber(valueText, out var number) &&
+                TryParseDynamicNumber(rule.CompareValue, out var minimum) &&
+                TryParseDynamicNumber(rule.CompareValue2, out var maximum) &&
+                minimum <= maximum && number >= minimum && number <= maximum,
+            HmiDynamicCondition.BitSet => TryGetDynamicUnsignedInteger(valueText, sourceDataType, out var setValue) &&
+                int.TryParse(rule.CompareValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var setBit) &&
+                setBit >= 0 && setBit <= GetDynamicMaximumBit(sourceDataType) && (setValue & (1UL << setBit)) != 0,
+            HmiDynamicCondition.BitClear => TryGetDynamicUnsignedInteger(valueText, sourceDataType, out var clearValue) &&
+                int.TryParse(rule.CompareValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var clearBit) &&
+                clearBit >= 0 && clearBit <= GetDynamicMaximumBit(sourceDataType) && (clearValue & (1UL << clearBit)) == 0,
+            HmiDynamicCondition.BitMaskEquals => TryGetDynamicUnsignedInteger(valueText, sourceDataType, out var maskedValue) &&
+                TryGetDynamicUnsignedInteger(rule.CompareValue, sourceDataType, out var mask) &&
+                TryGetDynamicUnsignedInteger(rule.CompareValue2, sourceDataType, out var expected) && (maskedValue & mask) == expected,
+            _ => false
+        };
+    }
+
+    private static bool DynamicValuesEqual(string value, string trigger, TagDataType? sourceDataType)
+    {
+        if (sourceDataType == TagDataType.String)
+        {
+            return string.Equals(value, trigger, StringComparison.OrdinalIgnoreCase);
+        }
+        if (sourceDataType == TagDataType.Bool &&
+            TryConvertDynamicBoolean(value, out var leftBoolean) &&
+            TryConvertDynamicBoolean(trigger, out var rightBoolean))
+        {
+            return leftBoolean == rightBoolean;
+        }
+        return string.Equals(value, trigger, StringComparison.OrdinalIgnoreCase) ||
+            DynamicNumericCompare(value, trigger, result => result == 0);
+    }
+
+    private static bool TryConvertDynamicBoolean(string? text, out bool value)
+    {
+        var normalized = (text ?? string.Empty).Trim();
+        if (bool.TryParse(normalized, out value))
+        {
+            return true;
+        }
+        if (normalized.Equals("vero", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("on", StringComparison.OrdinalIgnoreCase))
+        {
+            value = true;
+            return true;
+        }
+        if (normalized.Equals("falso", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("off", StringComparison.OrdinalIgnoreCase))
+        {
+            value = false;
+            return true;
+        }
+        if (TryParseDynamicNumber(normalized, out var number) && (number == 0 || number == 1))
+        {
+            value = number == 1;
+            return true;
+        }
+        value = false;
+        return false;
+    }
+
+    private static bool DynamicNumericCompare(string value, string trigger, Func<int, bool> comparison)
+    {
+        if (!TryParseDynamicNumber(value, out var left) || !TryParseDynamicNumber(trigger, out var right))
+        {
+            return false;
+        }
+        return comparison(left.CompareTo(right));
+    }
+
+    private static bool TryParseDynamicNumber(string? text, out double number)
+    {
+        var parsed = double.TryParse((text ?? string.Empty).Trim().Replace(',', '.'), NumberStyles.Float,
+            CultureInfo.InvariantCulture, out number);
+        return parsed && double.IsFinite(number);
+    }
+
+    private static bool TryGetDynamicUnsignedInteger(string? text, TagDataType? dataType, out ulong number)
+    {
+        number = 0;
+        if (!TryParseDynamicInteger(text, out var signedValue))
+        {
+            return false;
+        }
+        if (dataType == TagDataType.Int && signedValue >= short.MinValue && signedValue <= ushort.MaxValue)
+        {
+            number = unchecked((ushort)signedValue);
+            return true;
+        }
+        if (dataType == TagDataType.DInt && signedValue >= int.MinValue && signedValue <= uint.MaxValue)
+        {
+            number = unchecked((uint)signedValue);
+            return true;
+        }
+        return false;
+    }
+
+    private static bool TryParseDynamicInteger(string? text, out long number)
+    {
+        var normalized = (text ?? string.Empty).Trim();
+        if (bool.TryParse(normalized, out var boolean))
+        {
+            number = boolean ? 1 : 0;
+            return true;
+        }
+        if (normalized.StartsWith("0x", StringComparison.OrdinalIgnoreCase) &&
+            ulong.TryParse(normalized[2..], NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var hexadecimal))
+        {
+            number = unchecked((long)hexadecimal);
+            return true;
+        }
+        if (long.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out number))
+        {
+            return true;
+        }
+        if (TryParseDynamicNumber(normalized, out var floatingPoint) && floatingPoint >= long.MinValue && floatingPoint <= long.MaxValue &&
+            floatingPoint == Math.Truncate(floatingPoint))
+        {
+            number = (long)floatingPoint;
+            return true;
+        }
+        number = 0;
+        return false;
     }
 
     private static void ApplyDynamicColors(DependencyObject element, Brush background, Brush foreground)
@@ -4963,7 +5946,6 @@ public partial class MainWindow : Window
             if (tagIds.Contains(widget.Animation.TagId))
             {
                 widget.Animation.TagId = string.Empty;
-                widget.Animation.Enabled = widget.Type == HmiWidgetType.Indicator;
             }
         }
     }
@@ -5883,6 +6865,7 @@ public partial class MainWindow : Window
         {
             return;
         }
+        ApplyWidgetInspector();
         if (!CanDiscardChanges())
         {
             e.Cancel = true;
@@ -5898,7 +6881,23 @@ public partial class MainWindow : Window
             RecordRuntimeUserActivity();
             return;
         }
-        if (e.Key != Key.Delete || Keyboard.FocusedElement is TextBoxBase or PasswordBox)
+        if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Alt) && e.Key is Key.Left or Key.Right)
+        {
+            if (e.Key == Key.Left)
+            {
+                _leftSidebarCollapsed = !_leftSidebarCollapsed;
+                ApplyLeftSidebarLayout();
+            }
+            else
+            {
+                _rightSidebarCollapsed = !_rightSidebarCollapsed;
+                ApplyRightSidebarLayout();
+            }
+            e.Handled = true;
+            return;
+        }
+        if (e.Key != Key.Delete || Keyboard.FocusedElement is TextBoxBase or PasswordBox ||
+            Keyboard.FocusedElement is DependencyObject focusedElement && IsDescendantOf(focusedElement, InspectorSidebar))
         {
             return;
         }
@@ -5940,6 +6939,12 @@ public partial class MainWindow : Window
         HmiWidgetType.RuntimeExit or
         HmiWidgetType.LoginButton or
         HmiWidgetType.LogoutButton;
+
+    private static bool SupportsDynamicAppearance(HmiWidgetType type) => type is
+        HmiWidgetType.Button or
+        HmiWidgetType.ValueDisplay or
+        HmiWidgetType.NumericInput or
+        HmiWidgetType.Indicator;
 
     private static HmiTextAlignment DefaultTextAlignment(HmiWidgetType type) => type is
         HmiWidgetType.Button or
@@ -5998,6 +7003,28 @@ public partial class MainWindow : Window
         return null;
     }
 
+    private static bool IsDescendantOf(DependencyObject? element, DependencyObject ancestor)
+    {
+        while (element is not null)
+        {
+            if (ReferenceEquals(element, ancestor))
+            {
+                return true;
+            }
+            DependencyObject? parent = null;
+            try
+            {
+                parent = VisualTreeHelper.GetParent(element);
+            }
+            catch (InvalidOperationException)
+            {
+                // Alcuni elementi logici (per esempio gli item di una combo) non appartengono all'albero visuale.
+            }
+            element = parent ?? LogicalTreeHelper.GetParent(element);
+        }
+        return false;
+    }
+
     private static Brush BrushOf(string? value, string fallback = "#253244")
     {
         try
@@ -6006,7 +7033,30 @@ public partial class MainWindow : Window
         }
         catch
         {
-            return (Brush)new BrushConverter().ConvertFromString(fallback)!;
+            try
+            {
+                return (Brush)new BrushConverter().ConvertFromString(fallback)!;
+            }
+            catch
+            {
+                return Brushes.Transparent;
+            }
+        }
+    }
+
+    private static bool IsValidBrushCode(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+        try
+        {
+            return new BrushConverter().ConvertFromString(value.Trim()) is Brush;
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -6141,6 +7191,21 @@ public partial class MainWindow : Window
     private sealed record ChartSeriesEditorItem(ChartSeriesDefinition Series, string DisplayName, string TagName, string Color)
     {
         public override string ToString() => DisplayName;
+    }
+
+    private sealed record AnimationConditionOption(HmiDynamicCondition Value, string Label)
+    {
+        public override string ToString() => Label;
+    }
+
+    private sealed record AnimationRuleEditorItem(
+        HmiAnimationRuleDefinition Rule,
+        int Priority,
+        string Name,
+        string Summary,
+        string Background)
+    {
+        public override string ToString() => Name;
     }
 }
 

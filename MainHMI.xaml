@@ -238,6 +238,61 @@
             <Setter Property="MinHeight" Value="55"/>
             <Setter Property="FontSize" Value="12"/>
         </Style>
+        <Style x:Key="InspectorExpanderHeader" TargetType="ToggleButton">
+            <Setter Property="Background" Value="{StaticResource PanelAltBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource LineBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="HeaderBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="5" Padding="10,8">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <Path x:Name="HeaderArrow" Data="M 1,1 L 5,5 L 1,9" Stroke="{TemplateBinding Foreground}" StrokeThickness="1.6"
+                                      Width="6" Height="10" HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                                <ContentPresenter Grid.Column="1" VerticalAlignment="Center" RecognizesAccessKey="True"
+                                                  TextElement.Foreground="{TemplateBinding Foreground}" TextElement.FontSize="11"
+                                                  TextElement.FontWeight="SemiBold"/>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="HeaderBorder" Property="Background" Value="#1B2A38"/></Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="HeaderArrow" Property="Data" Value="M 1,1 L 5,5 L 9,1"/>
+                                <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                                <Setter TargetName="HeaderBorder" Property="BorderBrush" Value="#355066"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="PropertySectionExpander" TargetType="Expander">
+            <Setter Property="IsExpanded" Value="True"/>
+            <Setter Property="Margin" Value="0,6,0,0"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Expander">
+                        <StackPanel>
+                            <ToggleButton x:Name="HeaderSite" Content="{TemplateBinding Header}" IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
+                                          Style="{StaticResource InspectorExpanderHeader}"/>
+                            <Border x:Name="ExpandSite" BorderBrush="{StaticResource LineBrush}" BorderThickness="1,0,1,1"
+                                    CornerRadius="0,0,5,5" Padding="10,6,10,9" Background="#0F1821">
+                                <ContentPresenter ContentSource="Content"/>
+                            </Border>
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsExpanded" Value="False"><Setter TargetName="ExpandSite" Property="Visibility" Value="Collapsed"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <DrawingBrush x:Key="GridBrush" TileMode="Tile" Viewport="0,0,20,20" ViewportUnits="Absolute" Viewbox="0,0,20,20" ViewboxUnits="Absolute">
             <DrawingBrush.Drawing>
                 <GeometryDrawing Brush="#101821">
@@ -301,12 +356,14 @@
 
         <Grid Grid.Row="1" x:Name="MainWorkspace">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition x:Name="LeftSidebarColumn" Width="248"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition x:Name="RightSidebarColumn" Width="330"/>
+                <ColumnDefinition x:Name="LeftSidebarColumn" Width="330" MinWidth="280" MaxWidth="560"/>
+                <ColumnDefinition x:Name="LeftSidebarRailColumn" Width="28"/>
+                <ColumnDefinition Width="*" MinWidth="520"/>
+                <ColumnDefinition x:Name="RightSidebarRailColumn" Width="28"/>
+                <ColumnDefinition x:Name="RightSidebarColumn" Width="248" MinWidth="210" MaxWidth="420"/>
             </Grid.ColumnDefinitions>
 
-            <Border x:Name="DesignerSidebar" Grid.Column="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,1,0">
+            <Border x:Name="DesignerSidebar" Grid.Column="4" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1,0,0,0">
                 <Grid Margin="14">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
@@ -355,7 +412,17 @@
                 </Grid>
             </Border>
 
-            <Grid Grid.Column="1" Background="#090E14">
+            <Grid x:Name="LeftSidebarRail" Grid.Column="1" Background="#0D151E" Panel.ZIndex="3">
+                <GridSplitter x:Name="LeftSidebarSplitter" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                              Background="#263545" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
+                              ShowsPreview="True" KeyboardIncrement="16" Cursor="SizeWE" DragCompleted="SidebarSplitter_DragCompleted"
+                              ToolTip="Ridimensiona pannello Proprietà" AutomationProperties.Name="Ridimensiona pannello Proprietà"/>
+                <Button x:Name="ToggleLeftSidebarButton" Content="‹" Style="{StaticResource ToolbarButton}" Width="24" Height="34"
+                        Padding="0" Margin="2,8,2,0" VerticalAlignment="Top" Panel.ZIndex="2" Click="ToggleLeftSidebar_Click"
+                        ToolTip="Nascondi pannello Proprietà" AutomationProperties.Name="Nascondi pannello Proprietà"/>
+            </Grid>
+
+            <Grid Grid.Column="2" Background="#090E14">
                 <Grid.RowDefinitions>
                     <RowDefinition x:Name="WorkspaceToolbarRow" Height="44"/>
                     <RowDefinition Height="*"/>
@@ -404,7 +471,17 @@
                 </ScrollViewer>
             </Grid>
 
-            <Border x:Name="InspectorSidebar" Grid.Column="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1,0,0,0">
+            <Grid x:Name="RightSidebarRail" Grid.Column="3" Background="#0D151E" Panel.ZIndex="3">
+                <GridSplitter x:Name="RightSidebarSplitter" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                              Background="#263545" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
+                              ShowsPreview="True" KeyboardIncrement="16" Cursor="SizeWE" DragCompleted="SidebarSplitter_DragCompleted"
+                              ToolTip="Ridimensiona pannello Pagine e oggetti" AutomationProperties.Name="Ridimensiona pannello Pagine e oggetti"/>
+                <Button x:Name="ToggleRightSidebarButton" Content="›" Style="{StaticResource ToolbarButton}" Width="24" Height="34"
+                        Padding="0" Margin="2,8,2,0" VerticalAlignment="Top" Panel.ZIndex="2" Click="ToggleRightSidebar_Click"
+                        ToolTip="Nascondi pannello Pagine e oggetti" AutomationProperties.Name="Nascondi pannello Pagine e oggetti"/>
+            </Grid>
+
+            <Border x:Name="InspectorSidebar" Grid.Column="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,1,0">
                 <TabControl x:Name="InspectorTabs" Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}" Padding="8">
                     <TabItem Header="PROPRIETÀ">
                         <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="8">
@@ -447,18 +524,24 @@
                                 <TextBlock x:Name="NoSelectionText" Visibility="Collapsed"/>
                                 <StackPanel x:Name="WidgetInspector" Visibility="Collapsed">
                                     <TextBlock x:Name="WidgetTypeText" Text="PULSANTE" Foreground="{StaticResource AccentBrush}" FontWeight="Bold" Margin="0,8,0,4"/>
-                                    <TextBlock Text="Nome oggetto" Style="{StaticResource FieldLabel}"/>
-                                    <TextBox x:Name="WidgetNameBox" LostFocus="WidgetProperty_LostFocus"/>
-                                    <TextBlock Text="Livello accesso richiesto (0 = pubblico)" Style="{StaticResource FieldLabel}"/>
-                                    <TextBox x:Name="WidgetRequiredAccessLevelBox" LostFocus="WidgetProperty_LostFocus"/>
-                                    <StackPanel x:Name="WidgetTextPropertyGroup">
-                                        <TextBlock Text="Testo visualizzato" Style="{StaticResource FieldLabel}"/>
-                                        <TextBox x:Name="WidgetTextBox" LostFocus="WidgetProperty_LostFocus"/>
-                                    </StackPanel>
-                                    <StackPanel x:Name="WidgetNumericAppearancePropertyGroup" Margin="0,8,0,0">
-                                        <CheckBox x:Name="WidgetShowDescriptionCheck" Content="Mostra descrizione" Foreground="{StaticResource TextBrush}" Checked="WidgetOption_Click" Unchecked="WidgetOption_Click"/>
-                                        <CheckBox x:Name="WidgetShowBackgroundCheck" Content="Mostra sfondo e bordo" Foreground="{StaticResource TextBrush}" Margin="0,6,0,0" Checked="WidgetOption_Click" Unchecked="WidgetOption_Click"/>
-                                    </StackPanel>
+                                    <Expander x:Name="WidgetGeneralSection" Header="GENERALE E CONTENUTO" Style="{StaticResource PropertySectionExpander}" IsExpanded="True">
+                                        <StackPanel>
+                                            <TextBlock Text="Nome oggetto" Style="{StaticResource FieldLabel}"/>
+                                            <TextBox x:Name="WidgetNameBox" LostFocus="WidgetProperty_LostFocus"/>
+                                            <TextBlock Text="Livello accesso richiesto (0 = pubblico)" Style="{StaticResource FieldLabel}"/>
+                                            <TextBox x:Name="WidgetRequiredAccessLevelBox" LostFocus="WidgetProperty_LostFocus"/>
+                                            <StackPanel x:Name="WidgetTextPropertyGroup">
+                                                <TextBlock Text="Testo visualizzato" Style="{StaticResource FieldLabel}"/>
+                                                <TextBox x:Name="WidgetTextBox" LostFocus="WidgetProperty_LostFocus"/>
+                                            </StackPanel>
+                                            <StackPanel x:Name="WidgetNumericAppearancePropertyGroup" Margin="0,8,0,0">
+                                                <CheckBox x:Name="WidgetShowDescriptionCheck" Content="Mostra descrizione" Foreground="{StaticResource TextBrush}" Checked="WidgetOption_Click" Unchecked="WidgetOption_Click"/>
+                                                <CheckBox x:Name="WidgetShowBackgroundCheck" Content="Mostra sfondo e bordo" Foreground="{StaticResource TextBrush}" Margin="0,6,0,0" Checked="WidgetOption_Click" Unchecked="WidgetOption_Click"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Expander>
+                                    <Expander x:Name="WidgetConnectionsSection" Header="COLLEGAMENTI E RISORSE" Style="{StaticResource PropertySectionExpander}" IsExpanded="True">
+                                        <StackPanel>
                                     <StackPanel x:Name="WidgetTagPropertyGroup">
                                         <TextBlock Text="Tag collegata" Style="{StaticResource FieldLabel}"/>
                                         <ComboBox x:Name="WidgetTagCombo" DisplayMemberPath="Name" SelectedValuePath="Id" SelectionChanged="WidgetProperty_SelectionChanged"/>
@@ -479,6 +562,10 @@
                                         <TextBlock Text="Adattamento immagine" Style="{StaticResource FieldLabel}"/>
                                         <ComboBox x:Name="WidgetImageStretchCombo" SelectionChanged="WidgetProperty_SelectionChanged"/>
                                     </StackPanel>
+                                        </StackPanel>
+                                    </Expander>
+                                    <Expander x:Name="WidgetGeometrySection" Header="POSIZIONE E DIMENSIONI" Style="{StaticResource PropertySectionExpander}" IsExpanded="True">
+                                        <StackPanel>
                                     <Grid Margin="0,6,0,0">
                                         <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="10"/><ColumnDefinition/></Grid.ColumnDefinitions>
                                         <StackPanel><TextBlock Text="X" Style="{StaticResource FieldLabel}"/><TextBox x:Name="WidgetXBox" LostFocus="WidgetProperty_LostFocus"/></StackPanel>
@@ -489,6 +576,10 @@
                                         <StackPanel><TextBlock Text="Larghezza" Style="{StaticResource FieldLabel}"/><TextBox x:Name="WidgetWidthBox" LostFocus="WidgetProperty_LostFocus"/></StackPanel>
                                         <StackPanel Grid.Column="2"><TextBlock Text="Altezza" Style="{StaticResource FieldLabel}"/><TextBox x:Name="WidgetHeightBox" LostFocus="WidgetProperty_LostFocus"/></StackPanel>
                                     </Grid>
+                                        </StackPanel>
+                                    </Expander>
+                                    <Expander x:Name="WidgetAppearanceSection" Header="ASPETTO" Style="{StaticResource PropertySectionExpander}" IsExpanded="False">
+                                        <StackPanel>
                                     <StackPanel x:Name="WidgetFontSizePropertyGroup">
                                         <TextBlock Text="Dimensione testo" Style="{StaticResource FieldLabel}"/>
                                         <TextBox x:Name="WidgetFontSizeBox" LostFocus="WidgetProperty_LostFocus"/>
@@ -533,11 +624,17 @@
                                         <TextBlock Text="Codice colore testo" Style="{StaticResource FieldLabel}"/>
                                         <TextBox x:Name="WidgetForegroundBox" LostFocus="WidgetProperty_LostFocus"/>
                                     </StackPanel>
+                                        </StackPanel>
+                                    </Expander>
+                                    <Expander x:Name="WidgetValuesSection" Header="VALORI E COMANDI" Style="{StaticResource PropertySectionExpander}" IsExpanded="True">
                                     <Grid x:Name="WidgetValuePropertyGroup">
                                         <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="10"/><ColumnDefinition/></Grid.ColumnDefinitions>
                                         <StackPanel><TextBlock Text="Valore da scrivere" Style="{StaticResource FieldLabel}"/><TextBox x:Name="WidgetWriteValueBox" LostFocus="WidgetProperty_LostFocus"/></StackPanel>
                                         <StackPanel Grid.Column="2"><TextBlock Text="Suffisso" Style="{StaticResource FieldLabel}"/><TextBox x:Name="WidgetSuffixBox" LostFocus="WidgetProperty_LostFocus"/></StackPanel>
                                     </Grid>
+                                    </Expander>
+                                    <Expander x:Name="WidgetDataSection" Header="DATI E STORICI" Style="{StaticResource PropertySectionExpander}" IsExpanded="False">
+                                        <StackPanel>
                                     <StackPanel x:Name="WidgetHistoryPropertyGroup" Visibility="Collapsed">
                                         <TextBlock Text="STORICO DATABASE" Style="{StaticResource SectionLabel}" Margin="0,18,0,4"/>
                                         <TextBlock Text="Database iniziale (vuoto = configurato)" Style="{StaticResource FieldLabel}"/><TextBox x:Name="WidgetHistoryDatabaseBox" LostFocus="WidgetProperty_LostFocus"/>
@@ -593,21 +690,105 @@
                                         <TextBlock Text="Elimina allarmi risolti dopo (giorni)" Style="{StaticResource FieldLabel}"/>
                                         <TextBox x:Name="WidgetAlarmHistoryRetentionBox" LostFocus="WidgetProperty_LostFocus"/>
                                     </StackPanel>
-                                    <StackPanel x:Name="WidgetAnimationPropertyGroup">
-                                        <TextBlock x:Name="WidgetAnimationTitleText" Text="ANIMAZIONE DINAMICA" Style="{StaticResource SectionLabel}" Margin="0,18,0,4"/>
-                                        <CheckBox x:Name="WidgetAnimationEnabledCheck" Content="Abilita cambio colore da tag" Foreground="{StaticResource TextBrush}" Click="WidgetOption_Click"/>
-                                        <TextBlock x:Name="WidgetAnimationTagLabel" Text="Tag animazione" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="WidgetAnimationTagCombo" DisplayMemberPath="Name" SelectedValuePath="Id" SelectionChanged="WidgetProperty_SelectionChanged"/>
-                                        <TextBlock Text="Condizione" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="WidgetAnimationConditionCombo" SelectionChanged="WidgetProperty_SelectionChanged"/>
-                                        <TextBlock Text="Valore di confronto" Style="{StaticResource FieldLabel}"/><TextBox x:Name="WidgetAnimationValueBox" LostFocus="WidgetProperty_LostFocus"/>
-                                        <Grid x:Name="WidgetAnimationBackgroundGroup"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="10"/><ColumnDefinition/></Grid.ColumnDefinitions>
-                                            <StackPanel><TextBlock x:Name="WidgetActiveBackgroundLabel" Text="Sfondo attivo" Style="{StaticResource FieldLabel}"/><WrapPanel><Button Background="#12B981" Tag="#12B981" Style="{StaticResource ColorSwatchButton}" Click="ActiveBackgroundSwatch_Click"/><Button Background="#227CFF" Tag="#227CFF" Style="{StaticResource ColorSwatchButton}" Click="ActiveBackgroundSwatch_Click"/><Button Background="#F1B24A" Tag="#F1B24A" Style="{StaticResource ColorSwatchButton}" Click="ActiveBackgroundSwatch_Click"/><Button Background="#EF5B5B" Tag="#EF5B5B" Style="{StaticResource ColorSwatchButton}" Click="ActiveBackgroundSwatch_Click"/><Button Background="#7C5CFC" Tag="#7C5CFC" Style="{StaticResource ColorSwatchButton}" Click="ActiveBackgroundSwatch_Click"/></WrapPanel><TextBox x:Name="WidgetActiveBackgroundBox" LostFocus="WidgetProperty_LostFocus"/></StackPanel>
-                                            <StackPanel Grid.Column="2"><TextBlock x:Name="WidgetInactiveBackgroundLabel" Text="Sfondo inattivo" Style="{StaticResource FieldLabel}"/><WrapPanel><Button Background="#101821" Tag="#101821" Style="{StaticResource ColorSwatchButton}" Click="InactiveBackgroundSwatch_Click"/><Button Background="#253244" Tag="#253244" Style="{StaticResource ColorSwatchButton}" Click="InactiveBackgroundSwatch_Click"/><Button Background="#334155" Tag="#334155" Style="{StaticResource ColorSwatchButton}" Click="InactiveBackgroundSwatch_Click"/><Button Background="#8FA0B3" Tag="#8FA0B3" Style="{StaticResource ColorSwatchButton}" Click="InactiveBackgroundSwatch_Click"/><Button Background="Transparent" Tag="Transparent" Style="{StaticResource ColorSwatchButton}" Click="InactiveBackgroundSwatch_Click"/></WrapPanel><TextBox x:Name="WidgetInactiveBackgroundBox" LostFocus="WidgetProperty_LostFocus"/></StackPanel>
-                                        </Grid>
-                                        <Grid x:Name="WidgetAnimationForegroundGroup"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="10"/><ColumnDefinition/></Grid.ColumnDefinitions>
-                                            <StackPanel><TextBlock Text="Testo attivo" Style="{StaticResource FieldLabel}"/><WrapPanel><Button Background="#F8FAFC" Tag="#F8FAFC" Style="{StaticResource ColorSwatchButton}" Click="ActiveForegroundSwatch_Click"/><Button Background="#101820" Tag="#101820" Style="{StaticResource ColorSwatchButton}" Click="ActiveForegroundSwatch_Click"/><Button Background="#227CFF" Tag="#227CFF" Style="{StaticResource ColorSwatchButton}" Click="ActiveForegroundSwatch_Click"/><Button Background="#F1B24A" Tag="#F1B24A" Style="{StaticResource ColorSwatchButton}" Click="ActiveForegroundSwatch_Click"/><Button Background="#EF5B5B" Tag="#EF5B5B" Style="{StaticResource ColorSwatchButton}" Click="ActiveForegroundSwatch_Click"/></WrapPanel><TextBox x:Name="WidgetActiveForegroundBox" LostFocus="WidgetProperty_LostFocus"/></StackPanel>
-                                            <StackPanel Grid.Column="2"><TextBlock Text="Testo inattivo" Style="{StaticResource FieldLabel}"/><WrapPanel><Button Background="#8FA0B3" Tag="#8FA0B3" Style="{StaticResource ColorSwatchButton}" Click="InactiveForegroundSwatch_Click"/><Button Background="#CBD5E1" Tag="#CBD5E1" Style="{StaticResource ColorSwatchButton}" Click="InactiveForegroundSwatch_Click"/><Button Background="#334155" Tag="#334155" Style="{StaticResource ColorSwatchButton}" Click="InactiveForegroundSwatch_Click"/><Button Background="#F8FAFC" Tag="#F8FAFC" Style="{StaticResource ColorSwatchButton}" Click="InactiveForegroundSwatch_Click"/><Button Background="#EF5B5B" Tag="#EF5B5B" Style="{StaticResource ColorSwatchButton}" Click="InactiveForegroundSwatch_Click"/></WrapPanel><TextBox x:Name="WidgetInactiveForegroundBox" LostFocus="WidgetProperty_LostFocus"/></StackPanel>
-                                        </Grid>
-                                    </StackPanel>
+                                        </StackPanel>
+                                    </Expander>
+                                    <Expander x:Name="WidgetDynamicsSection" Header="DINAMICIZZAZIONE" Style="{StaticResource PropertySectionExpander}" IsExpanded="False">
+                                        <StackPanel x:Name="WidgetAnimationPropertyGroup">
+                                            <TextBlock x:Name="WidgetAnimationTitleText" Text="STATI DINAMICI A REGOLE" Foreground="{StaticResource AccentBrush}" FontWeight="SemiBold" Margin="0,2,0,8"/>
+                                            <CheckBox x:Name="WidgetAnimationEnabledCheck" Content="Abilita dinamizzazione da tag" Foreground="{StaticResource TextBrush}"
+                                                      Checked="AnimationOption_Changed" Unchecked="AnimationOption_Changed"/>
+                                            <TextBlock x:Name="WidgetAnimationTagLabel" Text="Tag sorgente" Style="{StaticResource FieldLabel}"/>
+                                            <ComboBox x:Name="WidgetAnimationTagCombo" DisplayMemberPath="Name" SelectedValuePath="Id" SelectionChanged="WidgetAnimationTagCombo_SelectionChanged"/>
+                                            <TextBlock Text="Le regole sono valutate dall'alto: viene applicata la prima vera." Foreground="{StaticResource MutedBrush}"
+                                                       FontSize="10" TextWrapping="Wrap" Margin="0,8,0,4"/>
+                                            <ListBox x:Name="WidgetAnimationRuleList" Height="150" SelectionChanged="WidgetAnimationRuleList_SelectionChanged">
+                                                <ListBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="18"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                                            <TextBlock Text="{Binding Priority}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                                                            <Border Grid.Column="1" Width="13" Height="13" CornerRadius="7" Background="{Binding Background}"
+                                                                    BorderBrush="#90A2B5" BorderThickness="1" VerticalAlignment="Center"/>
+                                                            <StackPanel Grid.Column="2" Margin="7,0,0,0">
+                                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                                                <TextBlock Text="{Binding Summary}" Foreground="{StaticResource MutedBrush}" FontSize="10" TextTrimming="CharacterEllipsis"/>
+                                                            </StackPanel>
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ListBox.ItemTemplate>
+                                            </ListBox>
+                                            <WrapPanel Margin="0,8,0,2">
+                                                <Button Content="Nuova" Style="{StaticResource ToolbarButton}" Margin="0,0,4,4" Click="NewAnimationRule_Click"/>
+                                                <Button Content="Duplica" Style="{StaticResource ToolbarButton}" Margin="0,0,4,4" Click="DuplicateAnimationRule_Click"/>
+                                                <Button Content="↑" Style="{StaticResource ToolbarButton}" Margin="0,0,4,4" Padding="9,6" Click="MoveAnimationRuleUp_Click" ToolTip="Priorità più alta"/>
+                                                <Button Content="↓" Style="{StaticResource ToolbarButton}" Margin="0,0,4,4" Padding="9,6" Click="MoveAnimationRuleDown_Click" ToolTip="Priorità più bassa"/>
+                                                <Button Content="Elimina" Style="{StaticResource ToolbarButton}" Background="#3A2026" BorderBrush="#6C303A" Margin="0,0,0,4" Click="DeleteAnimationRule_Click"/>
+                                            </WrapPanel>
+                                            <Border x:Name="WidgetAnimationRuleEditor" Background="#111B25" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="5" Padding="9" Visibility="Collapsed">
+                                                <StackPanel>
+                                                    <TextBlock Text="Nome stato" Style="{StaticResource FieldLabel}"/><TextBox x:Name="WidgetAnimationRuleNameBox" MaxLength="80" LostFocus="AnimationRuleEditor_LostFocus"/>
+                                                    <CheckBox x:Name="WidgetAnimationRuleEnabledCheck" Content="Regola abilitata" Foreground="{StaticResource TextBrush}" Margin="0,9,0,0" Click="AnimationRuleEditor_Click"/>
+                                                    <TextBlock Text="Condizione" Style="{StaticResource FieldLabel}"/>
+                                                    <ComboBox x:Name="WidgetAnimationRuleConditionCombo" DisplayMemberPath="Label" SelectedValuePath="Value" SelectionChanged="WidgetAnimationRuleConditionCombo_SelectionChanged"/>
+                                                    <StackPanel x:Name="WidgetAnimationOperand1Group">
+                                                        <TextBlock x:Name="WidgetAnimationOperand1Label" Text="Valore confronto" Style="{StaticResource FieldLabel}"/>
+                                                        <TextBox x:Name="WidgetAnimationOperand1Box" LostFocus="AnimationRuleEditor_LostFocus"/>
+                                                    </StackPanel>
+                                                    <StackPanel x:Name="WidgetAnimationOperand2Group">
+                                                        <TextBlock x:Name="WidgetAnimationOperand2Label" Text="Secondo valore" Style="{StaticResource FieldLabel}"/>
+                                                        <TextBox x:Name="WidgetAnimationOperand2Box" LostFocus="AnimationRuleEditor_LostFocus"/>
+                                                    </StackPanel>
+                                                    <TextBlock x:Name="WidgetAnimationRuleBackgroundLabel" Text="COLORE SFONDO / RIEMPIMENTO" Style="{StaticResource SectionLabel}" Margin="0,14,0,4"/>
+                                                    <WrapPanel>
+                                                        <Button Background="#12B981" Tag="#12B981" Style="{StaticResource ColorSwatchButton}" Click="AnimationRuleBackgroundSwatch_Click"/>
+                                                        <Button Background="#227CFF" Tag="#227CFF" Style="{StaticResource ColorSwatchButton}" Click="AnimationRuleBackgroundSwatch_Click"/>
+                                                        <Button Background="#F1B24A" Tag="#F1B24A" Style="{StaticResource ColorSwatchButton}" Click="AnimationRuleBackgroundSwatch_Click"/>
+                                                        <Button Background="#EF5B5B" Tag="#EF5B5B" Style="{StaticResource ColorSwatchButton}" Click="AnimationRuleBackgroundSwatch_Click"/>
+                                                        <Button Background="#7C5CFC" Tag="#7C5CFC" Style="{StaticResource ColorSwatchButton}" Click="AnimationRuleBackgroundSwatch_Click"/>
+                                                        <Button Background="#526273" Tag="#526273" Style="{StaticResource ColorSwatchButton}" Click="AnimationRuleBackgroundSwatch_Click"/>
+                                                        <Button Background="Transparent" Tag="Transparent" Style="{StaticResource ColorSwatchButton}" Click="AnimationRuleBackgroundSwatch_Click"/>
+                                                    </WrapPanel>
+                                                    <TextBox x:Name="WidgetAnimationRuleBackgroundBox" LostFocus="AnimationRuleEditor_LostFocus"/>
+                                                    <StackPanel x:Name="WidgetAnimationRuleForegroundGroup">
+                                                        <TextBlock Text="COLORE TESTO" Style="{StaticResource SectionLabel}" Margin="0,14,0,4"/>
+                                                        <WrapPanel>
+                                                            <Button Background="#F8FAFC" Tag="#F8FAFC" Style="{StaticResource ColorSwatchButton}" Click="AnimationRuleForegroundSwatch_Click"/>
+                                                            <Button Background="#101820" Tag="#101820" Style="{StaticResource ColorSwatchButton}" Click="AnimationRuleForegroundSwatch_Click"/>
+                                                            <Button Background="#227CFF" Tag="#227CFF" Style="{StaticResource ColorSwatchButton}" Click="AnimationRuleForegroundSwatch_Click"/>
+                                                            <Button Background="#F1B24A" Tag="#F1B24A" Style="{StaticResource ColorSwatchButton}" Click="AnimationRuleForegroundSwatch_Click"/>
+                                                            <Button Background="#EF5B5B" Tag="#EF5B5B" Style="{StaticResource ColorSwatchButton}" Click="AnimationRuleForegroundSwatch_Click"/>
+                                                        </WrapPanel>
+                                                        <TextBox x:Name="WidgetAnimationRuleForegroundBox" LostFocus="AnimationRuleEditor_LostFocus"/>
+                                                    </StackPanel>
+                                                    <Button Content="Salva regola" Style="{StaticResource AccentButton}" Margin="0,12,0,0" Click="SaveAnimationRule_Click"/>
+                                                </StackPanel>
+                                            </Border>
+                                            <TextBlock Text="STATO PREDEFINITO (NESSUNA REGOLA VERA)" Style="{StaticResource SectionLabel}" Margin="0,16,0,4" TextWrapping="Wrap"/>
+                                            <TextBlock x:Name="WidgetAnimationDefaultBackgroundLabel" Text="Colore sfondo / riempimento" Style="{StaticResource FieldLabel}"/>
+                                            <WrapPanel>
+                                                <Button Background="#526273" Tag="#526273" Style="{StaticResource ColorSwatchButton}" Click="AnimationDefaultBackgroundSwatch_Click"/>
+                                                <Button Background="#253244" Tag="#253244" Style="{StaticResource ColorSwatchButton}" Click="AnimationDefaultBackgroundSwatch_Click"/>
+                                                <Button Background="#12B981" Tag="#12B981" Style="{StaticResource ColorSwatchButton}" Click="AnimationDefaultBackgroundSwatch_Click"/>
+                                                <Button Background="#227CFF" Tag="#227CFF" Style="{StaticResource ColorSwatchButton}" Click="AnimationDefaultBackgroundSwatch_Click"/>
+                                                <Button Background="#F1B24A" Tag="#F1B24A" Style="{StaticResource ColorSwatchButton}" Click="AnimationDefaultBackgroundSwatch_Click"/>
+                                                <Button Background="#EF5B5B" Tag="#EF5B5B" Style="{StaticResource ColorSwatchButton}" Click="AnimationDefaultBackgroundSwatch_Click"/>
+                                                <Button Background="Transparent" Tag="Transparent" Style="{StaticResource ColorSwatchButton}" Click="AnimationDefaultBackgroundSwatch_Click"/>
+                                            </WrapPanel>
+                                            <TextBox x:Name="WidgetAnimationDefaultBackgroundBox" LostFocus="AnimationDefault_LostFocus"/>
+                                            <StackPanel x:Name="WidgetAnimationDefaultForegroundGroup">
+                                                <TextBlock Text="Colore testo predefinito" Style="{StaticResource FieldLabel}"/>
+                                                <WrapPanel>
+                                                    <Button Background="#8FA0B3" Tag="#8FA0B3" Style="{StaticResource ColorSwatchButton}" Click="AnimationDefaultForegroundSwatch_Click"/>
+                                                    <Button Background="#F8FAFC" Tag="#F8FAFC" Style="{StaticResource ColorSwatchButton}" Click="AnimationDefaultForegroundSwatch_Click"/>
+                                                    <Button Background="#101820" Tag="#101820" Style="{StaticResource ColorSwatchButton}" Click="AnimationDefaultForegroundSwatch_Click"/>
+                                                    <Button Background="#227CFF" Tag="#227CFF" Style="{StaticResource ColorSwatchButton}" Click="AnimationDefaultForegroundSwatch_Click"/>
+                                                    <Button Background="#EF5B5B" Tag="#EF5B5B" Style="{StaticResource ColorSwatchButton}" Click="AnimationDefaultForegroundSwatch_Click"/>
+                                                </WrapPanel>
+                                                <TextBox x:Name="WidgetAnimationDefaultForegroundBox" LostFocus="AnimationDefault_LostFocus"/>
+                                            </StackPanel>
+                                            <TextBlock x:Name="WidgetAnimationValidationText" Foreground="#F1B24A" FontSize="10" TextWrapping="Wrap" Margin="0,9,0,0" Visibility="Collapsed"/>
+                                        </StackPanel>
+                                    </Expander>
                                     <Button Content="Elimina oggetto" Style="{StaticResource ToolbarButton}" Background="#3A2026" BorderBrush="#6C303A" Margin="0,18,0,10" Click="DeleteWidget_Click"/>
                                 </StackPanel>
                             </Grid>
@@ -881,7 +1062,7 @@
                     <Ellipse x:Name="ConnectionDot" Width="7" Height="7" Fill="#6B7B8C" Margin="0,0,7,0"/>
                     <TextBlock x:Name="StatusText" Text="Modalità sviluppo · progetto pronto" Foreground="{StaticResource MutedBrush}" FontSize="10"/>
                 </StackPanel>
-                <TextBlock Grid.Column="1" Text="HMI Studio · formato progetto v4" Foreground="#5F7081" FontSize="10" VerticalAlignment="Center"/>
+                <TextBlock Grid.Column="1" Text="HMI Studio · formato progetto v5" Foreground="#5F7081" FontSize="10" VerticalAlignment="Center"/>
             </Grid>
         </Border>
     </Grid>
